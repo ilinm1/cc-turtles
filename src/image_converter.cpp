@@ -7,41 +7,56 @@
 #include "stb_image_write.h"
 #include "turtle.hpp"
 
+std::tuple<unsigned char&, unsigned char&, unsigned char&, unsigned char&> GetColor(unsigned char* data, unsigned int size, unsigned int index)
+{
+    if (index > size - 1)
+        throw std::runtime_error("Image index out of bounds.");
+
+    unsigned int imageIndex = index * 4;
+    return { data[imageIndex], data[imageIndex + 1], data[imageIndex + 2], data[imageIndex + 3] };
+}
+
+void AddColor(unsigned char* data, unsigned int size, unsigned int index, unsigned char x)
+{
+    auto [r, g, b, a] = GetColor(data, size, index);
+    r += x;
+    g += x;
+    b += x;
+}
+
 /*
-converts 8 bit 4 component images to 8 bit 1 component monochrome images (0 - transparent, 1 - black, 2 - white)
-all pixels with luminance lower than 'luminanceThreshold' will become black
+https://en.wikipedia.org/wiki/Floyd%E2%80%93Steinberg_dithering
+converts a r8g8b8a8 image (from 'data') to a grayscale image with the 'colors' colors using dithering (written back to 'data')
 if 'alphaToBlack' is set all of the transparent pixels will become black
-if 'modifyOriginal' is set input 'data' will be modified
+'errorMultiplier' is multiplied by quantization error (may be useful if algorithm is overcompensating)
+returns an array of bytes, each equal to pixel's color index (0 for transparent, 1 for black, and so on)
 */
-unsigned char* ImageToMonochrome(
+unsigned char* FloydSteinberg(
     unsigned char* data,
     unsigned int width,
     unsigned int height,
-    float luminanceThreshold,
-    bool alphaToBlack,
-    bool modifyOriginal)
+    unsigned int colors,
+    float errorMultiplier,
+    bool alphaToBlack)
 {
-    unsigned char* convertedData = new unsigned char[width * height];
+    if (colors < 2 || colors > 0xFF)
+        throw std::runtime_error("Amount of colors should be in 2 - 255 range.");
+
+    unsigned int size = width * height;
+    unsigned char* convertedData = new unsigned char[size];
+    unsigned char colorStep = 0xFF / (colors - 1);
 
     for (unsigned int i = 0; i < width * height; i++)
     {
-        unsigned int ii = i * 4;
+        auto [r, g, b, a] = GetColor(data, size, i);
 
-        unsigned char r = data[ii];
-        unsigned char g = data[ii + 1];
-        unsigned char b = data[ii + 2];
-        unsigned char a = data[ii + 3];
-
-        if (a != 0xFF)
+        if (a == 0)
         {
             if (alphaToBlack)
             {
                 convertedData[i] = 1;
-                if (modifyOriginal)
-                {
-                    data[ii] = data[ii + 1] = data[ii + 2] = 0x0;
-                    data[ii + 3] = 0xFF;
-                }
+                r = g = b = 0;
+                a = 0xFF;
             }
             else
             {
@@ -51,15 +66,36 @@ unsigned char* ImageToMonochrome(
             continue;
         }
 
+        //getting closest shade of gray
         //https://en.wikipedia.org/wiki/Relative_luminance
-        float luminance = (
-            0.2126 * (static_cast<float>(r) / 255.0f) +
-            0.7152 * (static_cast<float>(g) / 255.0f) +
-            0.0722 * (static_cast<float>(b) / 255.0f));
+        float luminance =
+            (static_cast<float>(r) / 255.0f) * 0.2126f +
+            (static_cast<float>(g) / 255.0f) * 0.7152f +
+            (static_cast<float>(b) / 255.0f) * 0.0722f;
+        unsigned char colorLevel = luminance * colors;
+        unsigned char color = colorLevel * colorStep;
 
-        convertedData[i] = luminance > luminanceThreshold ? 2 : 1;
-        if (modifyOriginal)
-            data[ii] = data[ii + 1] = data[ii + 2] = luminance > luminanceThreshold ? 0xFF : 0x0;
+        //passing quantization error
+        unsigned char quantizationError = (r + g + b - 3 * color) * errorMultiplier;
+
+        unsigned int index = i + 1; //right
+        if (index < size)
+            AddColor(data, size, index, quantizationError * 7 / 16);
+
+        index = i + width; //down
+        if (i + width < size)
+            AddColor(data, size, index, quantizationError * 5 / 16);
+
+        index = i + width - 1; //left & down
+        if (i + width - 1 < size)
+            AddColor(data, size, index, quantizationError * 3 / 16);
+
+        index = i + width + 1; //right & down
+        if (i + width + 1 < size)
+            AddColor(data, size, index, quantizationError / 16);
+
+        r = g = b = color;
+        convertedData[i] = colorLevel + 1;
     }
 
     return convertedData;
@@ -108,9 +144,13 @@ int main()
         return -1;
     }
 
-    float luminanceThreshold;
-    std::cout << "Brightness threshold: ";
-    std::cin >> luminanceThreshold;
+    int colors;
+    std::cout << "Color count: ";
+    std::cin >> colors;
+
+    float errorMultiplier;
+    std::cout << "Error multiplier (default - 1): ";
+    std::cin >> errorMultiplier;
 
     char alphaToBlack;
     std::cout << "Alpha to black? (Y/N) ";
@@ -124,7 +164,7 @@ int main()
 
     int width, height, channels;
     unsigned char* data = stbi_load(static_cast<const char*>(path.string().c_str()), &width, &height, &channels, 4);
-    unsigned char* convertedData = ImageToMonochrome(data, width, height, luminanceThreshold, alphaToBlack, true);
+    unsigned char* convertedData = FloydSteinberg(data, width, height, colors, errorMultiplier, alphaToBlack);
     stbi_write_png("img-output.png", width, height, 4, data, width * 4);
     WriteTurtleInstructions(convertedData, width, height, vertical);
 

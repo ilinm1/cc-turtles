@@ -1,4 +1,3 @@
-#include <iostream>
 #include <stdexcept>
 #include <format>
 #include <vector>
@@ -134,8 +133,8 @@ void UpdateCoordinates(TurtleState& state, int x, int y, int z)
 
 void MoveByRelative(TurtleState& state, int x, int y, int z, bool zfirst, bool yfirst)
 {
-    std::tuple<int, int, int> globalCoords = RelativeToGlobal(state.Rotation, x, y, z);
-    UpdateCoordinates(state, std::get<0>(globalCoords), std::get<1>(globalCoords), std::get<2>(globalCoords));
+    auto [gx, gy, gz] = RelativeToGlobal(state.Rotation, x, y, z);
+    UpdateCoordinates(state, gx, gy, gz);
     state.Rotation = x == 0 || !yfirst ? state.Rotation : IncrementRotation(state.Rotation, x < 0);
 
     TurtleAction xact = x > 0 ? TurtleAction::TurnRight : TurtleAction::TurnLeft;
@@ -171,14 +170,8 @@ void MoveByRelative(TurtleState& state, int x, int y, int z, bool zfirst, bool y
 
 void MoveByGlobal(TurtleState& state, int x, int y, int z, bool zfirst, bool yfirst)
 {
-    std::tuple<int, int, int> relative = GlobalToRelative(state.Rotation, x, y, z);
-    MoveByRelative(
-        state,
-        std::get<0>(relative),
-        std::get<1>(relative),
-        std::get<2>(relative),
-        zfirst,
-        yfirst);
+    auto [rx, ry, rz] = GlobalToRelative(state.Rotation, x, y, z);
+    MoveByRelative(state, rx, ry, rz, zfirst, yfirst);
 }
 
 void MoveToGlobal(TurtleState& state, int x, int y, int z, bool zfirst, bool yfirst)
