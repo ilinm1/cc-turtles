@@ -60,7 +60,7 @@ function processEvents()
                 arg2["data"]["slot"]
             ))
         end
-    elseif event == "char" then 
+    elseif event == "char" then
         commandBuffer = commandBuffer..arg1
     elseif event == "key" then
         if arg1 == keys.backspace then

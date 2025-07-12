@@ -101,15 +101,15 @@ unsigned char* FloydSteinberg(
     return convertedData;
 }
 
-void WriteTurtleInstructions(unsigned char* data, unsigned int width, unsigned int height, bool vertical)
+void WriteTurtleInstructions(unsigned char* data, unsigned int width, unsigned int height, unsigned int materials, bool vertical)
 {
     TurtleState state = TurtleState(width * height * 2 + 2048); //min two instructions per pixel + other stuff
     ConstructPlane(state, 0, 0, 0, width, height, data, vertical);
     MoveToGlobal(state, 0, 0, 1, false, false);
 
-    const unsigned int materialSlots = InventorySize / 2;
+    const unsigned int materialSlots = InventorySize / materials;
     std::vector<std::vector<unsigned char>> mats = {};
-    for (int im = 0; im < 2; im++)
+    for (int im = 0; im < materials; im++)
     {
         std::vector<unsigned char> slots = {};
         for (int is = 0; is < materialSlots; is++)
@@ -166,7 +166,7 @@ int main()
     unsigned char* data = stbi_load(static_cast<const char*>(path.string().c_str()), &width, &height, &channels, 4);
     unsigned char* convertedData = FloydSteinberg(data, width, height, colors, errorMultiplier, alphaToBlack);
     stbi_write_png("img-output.png", width, height, 4, data, width * 4);
-    WriteTurtleInstructions(convertedData, width, height, vertical);
+    WriteTurtleInstructions(convertedData, width, height, colors, vertical);
 
     free(data); //stbi is a C library so image's data was 100% allocated using malloc not new
     delete[] convertedData;
