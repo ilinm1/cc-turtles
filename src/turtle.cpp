@@ -1,10 +1,58 @@
 #include <stdexcept>
+#include <filesystem>
+#include <fstream>
 #include <format>
 #include <vector>
-#include <tuple>
 #include "turtle.hpp"
 
-char* Reserve(void* data, size_t& pos, size_t size, size_t toReserve)
+
+Vec3i Turtle::RelativeToGlobal(TurtleRotation rotation, Vec3i pos)
+{
+    int gx, gy;
+    switch (rotation)
+    {
+        case TurtleRotation::North:
+            gx = pos.X;
+            gy = pos.Y;
+            break;
+        case TurtleRotation::East:
+            gx = pos.Y;
+            gy = -pos.X;
+            break;
+        case TurtleRotation::South:
+            gx = -pos.X;
+            gy = -pos.Y;
+            break;
+        case TurtleRotation::West:
+            gx = -pos.Y;
+            gy = pos.X;
+            break;
+    }
+
+    return { gx, gy, pos.Z };
+}
+
+Vec3i Turtle::GlobalToRelative(TurtleRotation rotation, Vec3i pos)
+{
+    if (rotation == TurtleRotation::East)
+    {
+        rotation = TurtleRotation::West;
+    }
+    else if (rotation == TurtleRotation::West)
+    {
+        rotation = TurtleRotation::East;
+    }
+
+    return RelativeToGlobal(rotation, pos);
+}
+
+TurtleRotation Turtle::IncrementRotation(TurtleRotation rotation, bool left)
+{
+    return static_cast<TurtleRotation>((rotation + (left ? 3 : 1)) % 4);
+}
+
+//reserves 'toReserve' bytes of memory in buffer 'data' of size 'size'
+char* Reserve(void* data, unsigned int& pos, unsigned int size, unsigned int toReserve)
 {
     char* dataChar = reinterpret_cast<char*>(data);
 
@@ -16,291 +64,150 @@ char* Reserve(void* data, size_t& pos, size_t size, size_t toReserve)
     return ptr;
 }
 
-//returns amount of bytes written
-size_t WriteAction(TurtleState& state, TurtleAction action, unsigned int repeats)
+//returns the amount of bytes written
+unsigned int Turtle::WriteByte(unsigned char data, unsigned int repeats)
 {
-    if (!state.WriteInstructions)
+    if (!WriteInstructions)
         return 0;
 
     for (unsigned int i = 0; i < repeats; i++)
     {
-        *Reserve(state.Instructions, state.InstructionsPos, state.InstructionsSize, 1) = action;
+        *Reserve(Instructions, InstructionPos, InstructionSize, 1) = data;
     }
 
     return repeats;
 }
 
-/*
-each vector contains slots for a separate material
-there's a zero at the end of each material block, as well at the end of the entire data
-returns amount of bytes written
-*/
-size_t WriteMaterials(std::vector<std::vector<unsigned char>> mats, void* data, size_t pos, size_t size)
+void Turtle::MoveByRelative(Vec3i move, bool zfirst, bool yfirst)
 {
-    size_t initialPos = pos;
+    Vec3i globalMove = RelativeToGlobal(Rotation, move);
+    Pos += globalMove;
+    MaxPos = Vec3i::Max(MaxPos, Pos);
+    MinPos = Vec3i::Min(MinPos, Pos);
+    Rotation = move.X == 0 || !yfirst ? Rotation : IncrementRotation(Rotation, move.X < 0);
 
-    for (std::vector<unsigned char> slots : mats)
-    {
-        memcpy(Reserve(data, pos, size, slots.size()), slots.data(), slots.size());
-        *Reserve(data, pos, size, 1) = 0;
-    }
+    TurtleAction xact = move.X > 0 ? TurtleAction::TurnRight : TurtleAction::TurnLeft;
+    TurtleAction yact = move.Y > 0 ? TurtleAction::Forward : TurtleAction::Back;
+    TurtleAction zact = move.Z > 0 ? TurtleAction::Up : TurtleAction::Down;
 
-    *Reserve(data, pos, size, 1) = 0;
-
-    return pos - initialPos;
-}
-
-TurtleAction MaterialAction(unsigned int material)
-{
-    if (material > MaxMaterials)
-        throw std::runtime_error(std::format("Material number can't be greater than %u", MaxMaterials));
-
-    return static_cast<TurtleAction>(TurtleAction::Material1 + material - 1);
-}
-
-std::tuple<int, int, int> RelativeToGlobal(TurtleRotation rotation, int x, int y, int z)
-{
-    int gx = x;
-    int gy = y;
-
-    /*
-    y1 = y0 * cos(a) + x0 * sin(a)
-    x1 = x0 * cos(a) - y0 * sin(a)
-
-    a = -pi / 2
-    y1 = -x0
-    x1 = y0
-
-    pi/2   x  y
-    0      y -x 
-    -pi/2 -x -y
-    pi    -y  x
-    */
-    switch (rotation)
-    {
-        case TurtleRotation::East:
-            gx = y;
-            gy = -x;
-            break;
-        case TurtleRotation::South:
-            gx = -x;
-            gy = -y;
-            break;
-        case TurtleRotation::West:
-            gx = -y;
-            gy = x;
-            break;
-        default:
-            break;
-    }
-
-    return std::tuple<int, int, int>(gx, gy, z);
-}
-
-std::tuple<int, int, int> GlobalToRelative(TurtleRotation rotation, int x, int y, int z)
-{
-    if (rotation == TurtleRotation::East)
-    {
-        rotation = TurtleRotation::West;
-    }
-    else if (rotation == TurtleRotation::West)
-    {
-        rotation = TurtleRotation::East;
-    }
-
-    return RelativeToGlobal(rotation, x, y, z);
-}
-
-TurtleRotation IncrementRotation(TurtleRotation rotation, bool left)
-{
-    return static_cast<TurtleRotation>((rotation + (left ? 3 : 1)) % 4);
-}
-
-void UpdateCoordinates(TurtleState& state, int x, int y, int z)
-{
-    state.X += x;
-    state.Y += y;
-    state.Z += z;
-
-    state.MaxX = state.X > state.MaxX ? state.X : state.MaxX;
-    state.MaxY = state.Y > state.MaxY ? state.Y : state.MaxY;
-    state.MaxZ = state.Z > state.MaxZ ? state.Z : state.MaxZ;
-
-    state.MinX = state.X < state.MinX ? state.X : state.MinX;
-    state.MinY = state.Y < state.MinY ? state.Y : state.MinY;
-    state.MinZ = state.Z < state.MinZ ? state.Z : state.MinZ;
-}
-
-void MoveByRelative(TurtleState& state, int x, int y, int z, bool zfirst, bool yfirst)
-{
-    auto [gx, gy, gz] = RelativeToGlobal(state.Rotation, x, y, z);
-    UpdateCoordinates(state, gx, gy, gz);
-    state.Rotation = x == 0 || !yfirst ? state.Rotation : IncrementRotation(state.Rotation, x < 0);
-
-    TurtleAction xact = x > 0 ? TurtleAction::TurnRight : TurtleAction::TurnLeft;
-    TurtleAction yact = y > 0 ? TurtleAction::Forward : TurtleAction::Back;
-    TurtleAction zact = z > 0 ? TurtleAction::Up : TurtleAction::Down;
-
-    int ax = abs(x);
-    int ay = abs(y);
-    int az = abs(z);
+    Vec3i absMove = move.Abs();
 
     if (zfirst)
-        WriteAction(state, zact, az);
+        WriteByte(zact, absMove.Z);
 
     if (yfirst)
     {
-        WriteAction(state, yact, ay);
-        if (x != 0)
-            WriteAction(state, xact);
-        WriteAction(state, TurtleAction::Forward, ax);
+        WriteByte(yact, absMove.Y);
+        if (move.X != 0)
+            WriteByte(xact);
+        WriteByte(TurtleAction::Forward, absMove.X);
     }
     else
     {
-        if (x != 0) 
-            WriteAction(state, xact);
-        WriteAction(state, TurtleAction::Forward, ax);
-        WriteAction(state, xact == TurtleAction::TurnLeft ? TurtleAction::TurnRight : TurtleAction::TurnLeft);
-        WriteAction(state, yact, ay);
+        if (move.X != 0) 
+            WriteByte(xact);
+        WriteByte(TurtleAction::Forward, absMove.X);
+        WriteByte(xact == TurtleAction::TurnLeft ? TurtleAction::TurnRight : TurtleAction::TurnLeft);
+        WriteByte(yact, absMove.Y);
     }
 
     if (!zfirst)
-        WriteAction(state, zact, az);
+        WriteByte(zact, absMove.Z);
 }
 
-void MoveByGlobal(TurtleState& state, int x, int y, int z, bool zfirst, bool yfirst)
+void Turtle::MoveByGlobal(Vec3i move, bool zfirst, bool yfirst)
 {
-    auto [rx, ry, rz] = GlobalToRelative(state.Rotation, x, y, z);
-    MoveByRelative(state, rx, ry, rz, zfirst, yfirst);
+    Vec3i relMove = GlobalToRelative(Rotation, move);
+    MoveByRelative(relMove, zfirst, yfirst);
 }
 
-void MoveToGlobal(TurtleState& state, int x, int y, int z, bool zfirst, bool yfirst)
+void Turtle::MoveToGlobal(Vec3i pos, bool zfirst, bool yfirst)
 {
-    MoveByGlobal(state, x - state.X, y - state.Y, z - state.Z, zfirst, yfirst);
+    MoveByGlobal(pos - Pos, zfirst, yfirst);
 }
 
-void SetRotation(TurtleState& state, TurtleRotation rotation)
+void Turtle::SetRotation(TurtleRotation rotation)
 {
-    int turns = rotation - state.Rotation;
-    state.Rotation = rotation;
-    WriteAction(state, turns > 0 ? TurtleAction::TurnRight : TurtleAction::TurnLeft, abs(turns));
+    int turns = rotation - Rotation;
+    Rotation = rotation;
+    WriteByte(turns > 0 ? TurtleAction::TurnRight : TurtleAction::TurnLeft, abs(turns));
 }
 
-/*
-x0 y0 z0 must be the left lower point
-if 'dig' is set turtle will dig out parallelepiped's volume, otherwise place blocks inside of it (of currently selected material)
-*/
-void ConstructParallelepiped(TurtleState& state, int x0, int y0, int z0, int x1, int y1, int z1, bool dig)
+void Turtle::Dig(PlaceDigDirection dir)
 {
-    MoveToGlobal(state, x0, dig ? y0 - 1 : y0, dig ? z0 : z0 + 1, true, true);
-
-    if (dig)
+    switch (dir)
     {
-        SetRotation(state, TurtleRotation::North);
-        WriteAction(state, TurtleAction::Dig);
-        MoveByGlobal(state, 0, 1, 0, true, true);
-    }
-    else
-    {
-        WriteAction(state, TurtleAction::PlaceDown);
-    }
-
-    int width = x1 - x0;
-    int length = y1 - y0;
-    int height = z1 - z0;
-
-    int xstep = 1;
-    int ystep = 1;
-
-    for (int iz = 0; iz < height; iz++)
-    {
-        for (int ix = 0; ix < width; ix++)
-        {
-            if (dig)
-                SetRotation(state, ystep == 1 ? TurtleRotation::North : TurtleRotation::South);
-
-            for (int iy = 0; iy < length - 1; iy++)
-            {
-                if (dig)
-                    WriteAction(state, TurtleAction::Dig);
-
-                MoveByGlobal(state, 0, ystep, 0, true, true);
-
-                if (!dig)
-                    WriteAction(state, TurtleAction::PlaceDown);
-            }
-
-            if (ix != width - 1)
-            {
-                if (dig)
-                {
-                    SetRotation(state, xstep == 1 ? TurtleRotation::East : TurtleRotation::West);
-                    WriteAction(state, TurtleAction::Dig);
-                }
-
-                MoveByGlobal(state, xstep, 0, 0, true, true);
-
-                if (!dig)
-                    WriteAction(state, TurtleAction::PlaceDown);
-            }
-
-            ystep *= -1;
-        }
-
-        if (iz != height - 1)
-        {
-            if (dig)
-                WriteAction(state, TurtleAction::DigUp);
-
-            MoveByGlobal(state, 0, 0, 1, true, true);
-
-            if (!dig)
-                WriteAction(state, TurtleAction::PlaceDown);
-        }
-
-        xstep *= -1;
+    case PlaceDigDirection::Forward:
+        WriteByte(TurtleAction::Dig);
+        break;
+    case PlaceDigDirection::Up:
+        WriteByte(TurtleAction::DigUp);
+        break;
+    case PlaceDigDirection::Down:
+        WriteByte(TurtleAction::DigDown);
+        break;
     }
 }
 
-/*
-constructs plane from different materials specified in the 'data' array of width 'width' and height 'height'
-if 'vertical' is set plane will be constructed vertically
-*/
-void ConstructPlane(TurtleState& state, int x, int y, int z, unsigned int width, unsigned int height, unsigned char* data, bool vertical)
+void Turtle::Place(PlaceDigDirection dir)
 {
-    MoveToGlobal(state, x, y, z + 1, true, true);
-
-    unsigned char lastMaterial = 0;
-    int amax = (vertical ? height : width);
-    int bmax = (vertical ? width : height);
-    int bstep = 1;
-
-    for (int ia = 0; ia < amax; ia++)
+    switch (dir)
     {
-        for (int ib = 0; ib < bmax; ib++)
-        {
-            int ii = vertical ?
-                ((height - ia - 1) * width + (bstep == 1 ? ib : width - ib - 1)) :
-                ((bstep == 1 ? height - ib - 1 : ib) * width + ia);
-            unsigned char material = data[ii];
-
-            if (material != lastMaterial)
-            {
-                lastMaterial = material;
-                if (material != 0)
-                    WriteAction(state, MaterialAction(material));
-            }
-
-            if (material != 0)
-                WriteAction(state, TurtleAction::PlaceDown);
-
-            if (ib != bmax - 1)
-                MoveByGlobal(state, vertical ? bstep : 0, vertical ? 0 : bstep, 0, true, true);
-        }
-
-        if (ia != amax - 1)
-            MoveByGlobal(state, vertical ? 0 : 1, 0, vertical ? 1 : 0, true, true);
-
-        bstep *= -1;
+    case PlaceDigDirection::Forward:
+        WriteByte(TurtleAction::Place);
+        break;
+    case PlaceDigDirection::Up:
+        WriteByte(TurtleAction::PlaceUp);
+        break;
+    case PlaceDigDirection::Down:
+        WriteByte(TurtleAction::PlaceDown);
+        break;
     }
+}
+
+void Turtle::SelectSlot(unsigned char slot)
+{
+    if (slot == 0 || slot > InventorySize)
+        throw std::runtime_error("Invalid slot number (should be between 1 and 16).");
+    WriteByte(TurtleAction::SelectSlot);
+    WriteByte(slot);
+    SelectedSlot = slot;
+}
+
+void Turtle::Request(unsigned char mat, unsigned char amount)
+{
+    WriteByte(TurtleAction::Request);
+    WriteByte(mat);
+    WriteByte(amount);
+}
+
+void Turtle::Unload(unsigned char amount)
+{
+    WriteByte(TurtleAction::Unload);
+    WriteByte(amount);
+}
+
+void Turtle::Refuel(unsigned char amount)
+{
+    WriteByte(TurtleAction::Refuel);
+    WriteByte(amount);
+}
+
+void Turtle::WriteToFile(std::filesystem::path path, std::vector<std::string> mats)
+{
+    std::fstream file = std::fstream(path, std::ios::out | std::ios::binary | std::ios::trunc);
+    if (!file.is_open())
+        throw std::runtime_error("Failed to create output file.");
+
+    //writing material names
+    for (std::string name : mats)
+    {
+        file.write(reinterpret_cast<char*>(name.data()), name.size());
+    }
+    file.put(0); //two zeroes in a row signify the end of material data
+
+    //writing instructions
+    file.write(reinterpret_cast<char*>(Instructions), InstructionPos);
+
+    file.close();
 }

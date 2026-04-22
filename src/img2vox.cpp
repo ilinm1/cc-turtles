@@ -5,7 +5,8 @@
 #include <filesystem>
 #include "stb_image.h"
 #include "stb_image_write.h"
-#include "turtle.hpp"
+#include "voxel.hpp"
+
 
 std::tuple<unsigned char&, unsigned char&, unsigned char&, unsigned char&> GetColor(unsigned char* data, unsigned int size, unsigned int index)
 {
@@ -46,7 +47,7 @@ unsigned char* FloydSteinberg(
     unsigned char* convertedData = new unsigned char[size];
     unsigned char colorStep = 0xFF / (colors - 1);
 
-    for (unsigned int i = 0; i < width * height; i++)
+    for (int i = 0; i < size; i++)
     {
         auto [r, g, b, a] = GetColor(data, size, i);
 
@@ -101,35 +102,10 @@ unsigned char* FloydSteinberg(
     return convertedData;
 }
 
-void WriteTurtleInstructions(unsigned char* data, unsigned int width, unsigned int height, unsigned int materials, bool vertical)
+void WriteModel(unsigned char* data, unsigned int width, unsigned int height, unsigned int colors, bool vertical)
 {
-    TurtleState state = TurtleState(width * height * 2 + 2048); //min two instructions per pixel + other stuff
-    ConstructPlane(state, 0, 0, 0, width, height, data, vertical);
-    MoveToGlobal(state, 0, 0, 1, false, false);
-
-    const unsigned int materialSlots = InventorySize / materials;
-    std::vector<std::vector<unsigned char>> mats = {};
-    for (int im = 0; im < materials; im++)
-    {
-        std::vector<unsigned char> slots = {};
-        for (int is = 0; is < materialSlots; is++)
-        {
-            slots.push_back(im * materialSlots + is + 1);
-        }
-        mats.push_back(slots);
-    }
-
-    char* matData = new char[64];
-    size_t matDataSize = WriteMaterials(mats, matData, 0, 64);
-
-    std::fstream outputFile = std::fstream("img-output.bin", std::ios::out | std::ios::binary | std::ios::trunc);
-
-    if (!outputFile.is_open())
-        throw std::runtime_error("Failed to create output file");
-
-    outputFile.write(matData, matDataSize);
-    outputFile.write(reinterpret_cast<char*>(state.Instructions), state.InstructionsPos);
-    outputFile.close();
+    VoxelModel model = VoxelModel(width, vertical ? 1 : height, vertical ? height : 1, colors, data);
+    model.WriteToFile("img-output.bin");
 }
 
 int main()
@@ -144,7 +120,7 @@ int main()
         return -1;
     }
 
-    int colors;
+    unsigned int colors;
     std::cout << "Color count: ";
     std::cin >> colors;
 
@@ -166,10 +142,8 @@ int main()
     unsigned char* data = stbi_load(static_cast<const char*>(path.string().c_str()), &width, &height, &channels, 4);
     unsigned char* convertedData = FloydSteinberg(data, width, height, colors, errorMultiplier, alphaToBlack);
     stbi_write_png("img-output.png", width, height, 4, data, width * 4);
-    WriteTurtleInstructions(convertedData, width, height, colors, vertical);
+    WriteModel(convertedData, width, height, colors, vertical);
 
-    free(data); //stbi is a C library so image's data was 100% allocated using malloc not new
-    delete[] convertedData;
-
+    delete[] data;
     return 0;
 }

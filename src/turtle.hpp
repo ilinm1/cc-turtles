@@ -1,12 +1,12 @@
 #pragma once
-
+#include <filesystem>
 #include <vector>
-#include <tuple>
+#include "vec3i.hpp"
 
-const unsigned int MetadataSize = 32;
+
+const unsigned int StackSize = 64;
 const unsigned int InventorySize = 16;
-const unsigned int MaxMaterials = 8;
-const unsigned int MaxMaterialSlots = 8;
+const unsigned int MaxMaterials = 16;
 
 enum TurtleAction : unsigned char
 {
@@ -23,14 +23,10 @@ enum TurtleAction : unsigned char
     Place,
     PlaceUp,
     PlaceDown,
-    Material1,
-    Material2,
-    Material3,
-    Material4,
-    Material5,
-    Material6,
-    Material7,
-    Material8
+    SelectSlot, //following byte specifies the slot number
+    Request, //first following byte specifies the material number and a second one specifies the amount to request
+    Unload, //first following byte specifies the amount to unload
+    Refuel //first following byte specifies the amount of fuel to consume
 };
 
 enum TurtleRotation : unsigned char
@@ -41,52 +37,54 @@ enum TurtleRotation : unsigned char
     West
 };
 
-struct TurtleState
+enum PlaceDigDirection
+{
+    Forward,
+    Up,
+    Down
+};
+
+struct Turtle
 {
     //those x y z coordinates are global, meaning that they are relative to coordinate's system beginning/north oriented
-    int X = 0;
-    int Y = 0;
-    int Z = 0;
-
-    int MaxX = 0;
-    int MaxY = 0;
-    int MaxZ = 0;
-
-    int MinX = 0;
-    int MinY = 0;
-    int MinZ = 0;
-
+    Vec3i Pos;
+    Vec3i MaxPos;
+    Vec3i MinPos;
     TurtleRotation Rotation = TurtleRotation::North;
+    unsigned char SelectedSlot;
 
-    bool WriteInstructions = true;
-    size_t InstructionsSize;
-    size_t InstructionsPos;
+    bool WriteInstructions = true; //if not set then position, rotation and other parameters will be updated but no instruction will be written
+    unsigned int InstructionSize;
+    unsigned int InstructionPos;
     unsigned char* Instructions;
 
-    TurtleState(size_t alloc)
+    Turtle(unsigned int alloc)
     {
-        InstructionsPos = 0;
-        InstructionsSize = alloc;
+        InstructionPos = 0;
+        InstructionSize = alloc;
         Instructions = new unsigned char[alloc];
     }
 
-    ~TurtleState()
+    ~Turtle()
     {
         delete[] Instructions;
     }
+
+    static Vec3i RelativeToGlobal(TurtleRotation rotation, Vec3i pos);
+    static Vec3i GlobalToRelative(TurtleRotation rotation, Vec3i pos);
+    static TurtleRotation IncrementRotation(TurtleRotation rotation, bool left);
+
+    unsigned int WriteByte(unsigned char data, unsigned int repeats = 1);
+    void MoveByRelative(Vec3i move, bool zfirst = false, bool yfirst = false);
+    void MoveByGlobal(Vec3i move, bool zfirst = false, bool yfirst = false);
+    void MoveToGlobal(Vec3i pos, bool zfirst = false, bool yfirst = false);
+    void SetRotation(TurtleRotation rotation);
+    void Dig(PlaceDigDirection dir);
+    void Place(PlaceDigDirection dir);
+    void SelectSlot(unsigned char slot);
+    void Request(unsigned char mat, unsigned char amount);
+    void Unload(unsigned char amount);
+    void Refuel(unsigned char amount);
+
+    void WriteToFile(std::filesystem::path path, std::vector<std::string> mats);
 };
-
-size_t WriteAction(TurtleState& state, TurtleAction action, unsigned int repeats = 1);
-size_t WriteMaterials(std::vector<std::vector<unsigned char>> mats, void* data, size_t pos, size_t size);
-
-TurtleAction MaterialAction(unsigned int material);
-std::tuple<int, int, int> RelativeToGlobal(TurtleRotation rotation, int x, int y, int z);
-std::tuple<int, int, int> GlobalToRelative(TurtleRotation rotation, int x, int y, int z);
-TurtleRotation IncrementRotation(TurtleRotation rotation, bool left);
-
-void MoveByRelative(TurtleState& state, int x, int y, int z, bool zfirst, bool yfirst);
-void MoveByGlobal(TurtleState& state, int x, int y, int z, bool zfirst, bool yfirst);
-void MoveToGlobal(TurtleState& state, int x, int y, int z, bool zfirst, bool yfirst);
-void SetRotation(TurtleState& state, TurtleRotation rotation);
-void ConstructParallelepiped(TurtleState& state, int x0, int y0, int z0, int x1, int y1, int z1, bool dig);
-void ConstructPlane(TurtleState& state, int x, int y, int z, unsigned int width, unsigned int height, unsigned char* data, bool vertical);
