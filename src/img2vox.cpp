@@ -125,7 +125,7 @@ int main()
     std::cin >> colors;
 
     float errorMultiplier;
-    std::cout << "Error multiplier (default - 1): ";
+    std::cout << "Error multiplier (typically somewhere in 0.001-0.005 range): ";
     std::cin >> errorMultiplier;
 
     char alphaToBlack;
