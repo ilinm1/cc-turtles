@@ -1,4 +1,3 @@
-inventorySize = 16
 processEventTimeout = 0.25
 
 controllerId = nil
@@ -10,6 +9,8 @@ paused = false
 
 action = 0
 instructionIndex = 0
+materials = nil
+refillModemConnected = false
 
 --global coordinates
 currentRotation = 1 --1 north, 2 east, 3 south, 4 west
@@ -17,13 +18,46 @@ currentX = 0
 currentY = 0
 currentZ = 0
 
-remainingMaterials = 0
-lastMaterial = 1
+--misc
+function readNext()
+    instructionIndex = instructionIndex + 1
+    return instructionHandle.read()
+end
 
-fuelSlots = {}
-materialSlots = {}
+function findRefillModem()
+    for _, side in pairs(rs.getSides()) do
+        if peripheral.isPresent(side) and peripheral.getType(side) == "modem" then
+            modem = peripheral.wrap(side)
+            if not modem.isWireless() then
+                rednet.open(side)
+                refillModemConnected = true
+                return true
+            end
+        end
+    end
 
---utilities
+    return false
+end
+
+function request(id, amount)
+    if not refillModemConnected and not findRefillModem() then
+        return false, "No wired modem found at refill."
+    end
+
+    paused = true
+    writeLog(string.format("Requesting %d (material %d) units of '%s'.", amount, id, materials[id]))
+    rednet.broadcast({type = "request", item = materials[id], amount = amount, slot = turtle.getSelectedSlot()})
+end
+
+function unload(amount)
+    if not refillModemConnected and not findRefillModem() then
+        return false, "No wired modem found at refill."
+    end
+
+    paused = true
+    writeLog(string.format("Unloading %d items."), amount)
+    rednet.broadcast({type = "unload", amount = amount, slot = turtle.getSelectedSlot()})
+end
 
 function writeLog(msg)
     logHandle.writeLine(msg)
@@ -88,112 +122,55 @@ function checkAction(result, err)
     end
 end
 
-function selectMaterial(materialId)
-    writeLog(string.format("Selecting material %d.", materialId))
-    lastMaterial = materialId
-
-    for index, slot in pairs(materialSlots[materialId]) do
-        if turtle.getItemCount(slot) == 0 then
-            writeLog(string.format("Material slot %d is depleted.", slot))
-            materialSlots[materialId][index] = nil
-        else
-            writeLog(string.format("Selecting slot %d.", slot))
-            remainingMaterials = turtle.getItemCount(slot)
-            return turtle.select(slot)
-        end
-    end
-
-    return false, string.format("All material slots for material ID %d are depleted.", materialId)
-end
-
-function refuel()
-    if #fuelSlots == 0 then
-        for slot = 1, inventorySize do
-            turtle.select(slot)
-            if turtle.refuel(0) then fuelSlots[#fuelSlots+1] = slot end
-        end
-    end
-
-    refueled = false
-
-    for index, slot in pairs(fuelSlots) do
-        writeLog(string.format("Attempting to refuel using slot %d.", slot))
-        turtle.select(slot)
-        if not turtle.refuel() then
-            writeLog(string.format("Fuel slot %d is depleted.", slot))
-            fuelSlots[index] = nil
-        else
-            refueled = true
-        end
-    end
-
-    if not refueled then
-        writeLog("Failed to refuel using any of the fuel slots.")
-        return false
-    end
-end
-
 --setup
 
 function readMaterialData()
-    zeroRead = false
-    slots = {}
-
+    str = ""
+    strEnd = false
     while true do
-        slot = instructionHandle.read()
-        instructionIndex = instructionIndex + 1
+        ch = readNext()
 
-        if slot == 0 then
-            if zeroRead then break end --all materials read
-            zeroRead = true
-            materialSlots[#materialSlots+1] = slots
-            slots = {}
+        if not ch then
+            if strEnd then --two zeroes in a row -> end of material data
+                break
+            end
+            materials[#materials] = str
+            strEnd = true
         else
-            zeroRead = false
-            slots[#slots+1] = slot
+            str .. ch
+            strEnd = false
         end
     end
 
-    writeLog(string.format("Material data read, %d materials registered.", #materialSlots))
-    for materialId = 1, #materialSlots do
-        writeLog(string.format("Material %d", materialId))
-        for index, slot in pairs(materialSlots[materialId]) do writeLog(string.format("%d - %d", index, slot)) end
+    writeLog(string.format("Material data read, %d materials registered.", #materials))
+    for id = 0, #materials - 1 do
+        writeLog(string.format("Material %d - '%s'.", id, materials[id]))
     end
 end
 
-function setupRednet()
-    if rednet.isOpen() then
-        return true
-    end
-
+function setupWirelessComm()
     for _, side in pairs(rs.getSides()) do
         if peripheral.isPresent(side) and peripheral.getType(side) == "modem" then
-            rednet.open(side)
-            return true
+            if peripheral.wrap(side).isWireless() then
+                rednet.open(side)
+                return true
+            end
         end
     end
 
     return false
 end
 
---work
+--main loop
 
 function nextAction()
-    action = instructionHandle.read()
-    instructionIndex = instructionIndex + 1
+    if waitingForProvider then return false end
+
+    action = readNext()
 
     if action == nil then
         writeLog("EOF in instruction file.")
         return false
-    end
-
-    if turtle.getFuelLevel() == 0 then
-        if not refuel() then return false end
-    end
-
-    if action > 9 and action < 13 then
-        if remainingMaterials <= 0 then checkAction(selectMaterial(lastMaterial)) end
-        remainingMaterials = remainingMaterials - 1
     end
 
     if          action == 1     then    checkAction(turtle.forward())    modifyPosition(0, 1, 0)
@@ -208,14 +185,10 @@ function nextAction()
     elseif      action == 10    then    checkAction(turtle.place())
     elseif      action == 11    then    checkAction(turtle.placeUp())
     elseif      action == 12    then    checkAction(turtle.placeDown())
-    elseif      action == 13    then    checkAction(selectMaterial(1))
-    elseif      action == 14    then    checkAction(selectMaterial(2))
-    elseif      action == 15    then    checkAction(selectMaterial(3))
-    elseif      action == 16    then    checkAction(selectMaterial(4))
-    elseif      action == 17    then    checkAction(selectMaterial(5))
-    elseif      action == 18    then    checkAction(selectMaterial(6))
-    elseif      action == 19    then    checkAction(selectMaterial(7))
-    elseif      action == 20    then    checkAction(selectMaterial(8))
+    elseif      action == 13    then    checkAction(turtle.select(readNext()))
+    elseif      action == 14    then    checkAction(request(readNext(), readNext()))
+    elseif      action == 15    then    checkAction(unload(readNext()))
+    elseif      action == 16    then    checkAction(turtle.refuel(readNext()))
     else writeLog("Unknown action/NOP")
     end
 
@@ -239,6 +212,8 @@ function processMessage(id, msg)
                     rot = currentRotation,
                     fuel = turtle.getFuelLevel(),
                     slot = turtle.getSelectedSlot(),
+                    paused = paused,
+                    onRefill = refillModemConnected
                 }
             })
     elseif msg["type"] == "pause" then
@@ -251,13 +226,18 @@ function processMessage(id, msg)
         writeLog(string.format("Jumping to instruction no. %d.", msg["instr"]))
         instructionIndex = msg["instr"]
         instructionHandle.seek("set", instructionIndex)
+    elseif msg["type"] == "request_done" then
+        paused = false
     end
 
     return true, false
 end
 
 function processEvents()
-    local timerId = os.startTimer(processEventTimeout)
+    local timerId = nil
+    if not paused then
+        timerId = os.startTimer(processEventTimeout)
+    end
 
     while true do
         local event, arg1, arg2 = os.pullEvent()
@@ -273,8 +253,6 @@ function processEvents()
 
     return true, false
 end
-
---work wrappers
 
 function nextAction_wrapper()
     if not paused then
@@ -304,7 +282,7 @@ function processEvents_wrapper()
     end
 end
 
---driver
+--entrypoint
 
 print("== Turtle driver v0.5 ==")
 logHandle = fs.open("turtle-log.txt", fs.exists("turtle-log.txt") and "a" or "w")
@@ -335,7 +313,7 @@ if controllerIdStr ~= "" then
     controllerId = tonumber(controllerIdStr)
 end
 
-if controllerId == nil or setupRednet() then
+if controllerId == nil or setupWirelessComm() then
     print("Started. Use turtle controller to send commands and see errors.")
 
     moveBy(offsetX, offsetY, offsetZ)
@@ -346,4 +324,4 @@ if controllerId == nil or setupRednet() then
     writeLog("Finishing.")
     logHandle.close()
     instructionHandle.close()
-else print("Failed to setup rednet, make sure that you're using turtle with a modem.") end
+else print("Failed to setup rednet, make sure that you're using turtle with a modem (or if you don't need remote control leave controller ID empty).") end

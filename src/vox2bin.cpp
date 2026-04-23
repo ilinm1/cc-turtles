@@ -14,6 +14,8 @@ unsigned char CurrentSlot[MaxMaterials]; //current slot used by the material
 
 void RefillTurtle(Turtle& turtle, VoxelModel& model, std::vector<Vec3i> refills)
 {
+	Vec3i oldPos = turtle.Pos;
+
 	Vec3i nearestRefill;
 	unsigned int minDistance = std::numeric_limits<unsigned int>().max();
 	for (Vec3i refill : refills)
@@ -21,7 +23,7 @@ void RefillTurtle(Turtle& turtle, VoxelModel& model, std::vector<Vec3i> refills)
 		unsigned int dist = (refill - turtle.Pos).LengthLinear();
 	}
 
-	turtle.MoveToGlobal(nearestRefill, false, true);
+	turtle.MoveToGlobal(nearestRefill, false);
 
 	//load first slot with as much coal as possible, consume as much as needed, return the rest back to the storage
 	turtle.SelectSlot(1);
@@ -31,6 +33,7 @@ void RefillTurtle(Turtle& turtle, VoxelModel& model, std::vector<Vec3i> refills)
 
 	RefillBlockBeginning = turtle.InstructionPos;
 	turtle.WriteByte(TurtleAction::None, InventorySize * 5); //2 bytes per select slot instruction and another 3 per request instruction, for each inventory slot
+	turtle.MoveToGlobal(oldPos, true);
 
 	SlotsUsed = 0;
 	memset(ItemCount, 0, sizeof(ItemCount));
@@ -56,7 +59,7 @@ void UseMaterial(Turtle& turtle, VoxelModel& model, std::vector<Vec3i> refills, 
 		SlotsUsed++;
 	}
 
-	if (SlotsUsed == InventorySize)
+	if (SlotsUsed == InventorySize) //time to refill
 	{
 		unsigned int ipos = turtle.InstructionPos;
 		turtle.InstructionPos = RefillBlockBeginning;
@@ -200,13 +203,12 @@ int main()
 {
 	std::cout << "== vox2bin ==\n";
 
-	std::string str;
-
 	unsigned int alloc;
 	std::cout << "Instruction buffer size (in bytes): ";
 	std::cin >> alloc;
 	Turtle turtle = Turtle(alloc);
 
+	std::string str;
 	std::cout << "Path to model (empty string to stop inputting models): ";
 	std::cin >> str;
 	VoxelModel model = VoxelModel(str);

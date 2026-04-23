@@ -102,21 +102,17 @@ unsigned char* FloydSteinberg(
     return convertedData;
 }
 
-void WriteModel(unsigned char* data, unsigned int width, unsigned int height, unsigned int colors, bool vertical)
-{
-    VoxelModel model = VoxelModel(width, vertical ? 1 : height, vertical ? height : 1, colors, data);
-    model.WriteToFile("img-output.bin");
-}
-
 int main()
 {
+    std::cout << "== img2vox ==\n";
+
     std::filesystem::path path = {};
     std::cout << "Image path: ";
     std::cin >> path;
 
     if (!std::filesystem::exists(path))
     {
-        std::cout << "Invalid file path.\n";
+        std::cout << "Invalid file path.";
         return -1;
     }
 
@@ -142,7 +138,8 @@ int main()
     unsigned char* data = stbi_load(static_cast<const char*>(path.string().c_str()), &width, &height, &channels, 4);
     unsigned char* convertedData = FloydSteinberg(data, width, height, colors, errorMultiplier, alphaToBlack);
     stbi_write_png("img-output.png", width, height, 4, data, width * 4);
-    WriteModel(convertedData, width, height, colors, vertical);
+    VoxelModel model = VoxelModel(width, vertical ? 1 : height, vertical ? height : 1, colors, convertedData);
+    model.WriteToFile("img-output.bin");
 
     delete[] data;
     return 0;

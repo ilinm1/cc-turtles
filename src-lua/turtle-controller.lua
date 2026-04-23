@@ -2,16 +2,16 @@ commandBuffer = ""
 maxX, maxY = 0, 0
 selectedTurtle = 0
 
-function setupRednet()
-    if rednet.isOpen() then
-        return true
-    end
-    for _, side in ipairs( rs.getSides() ) do
+function setupWirelessComm()
+    for _, side in pairs(rs.getSides()) do
         if peripheral.isPresent(side) and peripheral.getType(side) == "modem" then
-            rednet.open(side)
-            return true
+            if peripheral.wrap(side).isWireless() then
+                rednet.open(side)
+                return true
+            end
         end
     end
+
     return false
 end
 
@@ -48,16 +48,18 @@ function processEvents()
         if arg2["type"] == "msg" then
             writeMessage(string.format("%d | %s", arg1, arg2["data"]))
         elseif arg2["type"] == "status" then
+            writeMessage("== Status for turtle %d ==", arg1)
             writeMessage(string.format(
-                "Status for %d | Instruction: %d | X: %d | Y: %d | Z: %d | Rotation: %d | Fuel: %d | Slot: %d",
-                arg1,
+                "Instruction: %d | X: %d | Y: %d | Z: %d | Rotation: %d | Fuel: %d | Slot: %d | Paused: %d | On refill: %d",
                 arg2["data"]["instr"],
                 arg2["data"]["x"],
                 arg2["data"]["y"],
                 arg2["data"]["z"],
                 arg2["data"]["rot"],
                 arg2["data"]["fuel"],
-                arg2["data"]["slot"]
+                arg2["data"]["slot"],
+                arg2["data"]["paused"],
+                arg2["data"]["onRefill"]
             ))
         end
     elseif event == "char" then
@@ -84,10 +86,9 @@ function processEvents()
     end
 end
 
---Driver code
+--entrypoint
 print("== Turtle controller v0.5 ==")
-
-if(setupRednet()) then
+if setupWirelessComms() then
     maxX, maxY = term.getSize()
     while true do processEvents() end
-else print("Failed to setup rednet, please check that modem is installed on this computer.") end
+else print("Failed to setup rednet, check that modem is installed on this computer.") end
