@@ -37,47 +37,33 @@ enum TurtleRotation : unsigned char
     West
 };
 
-enum PlaceDigDirection
+enum PlaceDigDirection : unsigned char
 {
-    Forward,
-    Up,
-    Down
+    Straight,
+    Above,
+    Below
 };
 
 struct Turtle
 {
     //those x y z coordinates are global, meaning that they are relative to coordinate's system beginning/north oriented
-    Vec3i Pos;
-    Vec3i MaxPos;
-    Vec3i MinPos;
+    Vec3i Pos = Vec3i(0);
+    Vec3i MaxPos = Vec3i(0);
+    Vec3i MinPos = Vec3i(0);
     TurtleRotation Rotation = TurtleRotation::North;
-    unsigned char SelectedSlot;
+    unsigned char SelectedSlot = 0;
 
     bool WriteInstructions = true; //if not set then position, rotation and other parameters will be updated but no instruction will be written
-    unsigned int InstructionSize;
-    unsigned int InstructionPos;
-    unsigned char* Instructions;
-
-    Turtle(unsigned int alloc)
-    {
-        InstructionPos = 0;
-        InstructionSize = alloc;
-        Instructions = new unsigned char[alloc];
-    }
-
-    ~Turtle()
-    {
-        delete[] Instructions;
-    }
+    std::vector<unsigned char> Instructions;
 
     static Vec3i RelativeToGlobal(TurtleRotation rotation, Vec3i pos);
     static Vec3i GlobalToRelative(TurtleRotation rotation, Vec3i pos);
     static TurtleRotation IncrementRotation(TurtleRotation rotation, bool left);
 
-    unsigned int WriteByte(unsigned char data, unsigned int repeats = 1);
-    void MoveByRelative(Vec3i move, bool zfirst = false, bool yfirst = false);
-    void MoveByGlobal(Vec3i move, bool zfirst = false, bool yfirst = false);
-    void MoveToGlobal(Vec3i pos, bool zfirst = false, bool yfirst = false);
+    void WriteByte(unsigned char byte, unsigned int repeats = 1);
+    void MoveByRelative(Vec3i move, bool zfirst = false);
+    void MoveByGlobal(Vec3i move, bool zfirst = false);
+    void MoveToGlobal(Vec3i pos, bool zfirst = false);
     void SetRotation(TurtleRotation rotation);
     void Dig(PlaceDigDirection dir);
     void Place(PlaceDigDirection dir);
@@ -86,5 +72,5 @@ struct Turtle
     void Unload(unsigned char amount);
     void Refuel(unsigned char amount);
 
-    void WriteToFile(std::filesystem::path path, std::vector<std::string> mats);
+    void WriteToFile(std::filesystem::path path, std::vector<std::string>& mats);
 };

@@ -15,7 +15,7 @@ struct Vec3i
 
     Vec3i(int x, int y, int z)
     {
-        X = z; Y = y; Z = z;
+        X = x; Y = y; Z = z;
     }
 
     //returns vector with maximal component values of both input vectors

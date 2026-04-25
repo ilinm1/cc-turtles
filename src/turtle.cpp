@@ -51,40 +51,24 @@ TurtleRotation Turtle::IncrementRotation(TurtleRotation rotation, bool left)
     return static_cast<TurtleRotation>((rotation + (left ? 3 : 1)) % 4);
 }
 
-//reserves 'toReserve' bytes of memory in buffer 'data' of size 'size'
-char* Reserve(void* data, unsigned int& pos, unsigned int size, unsigned int toReserve)
-{
-    char* dataChar = reinterpret_cast<char*>(data);
-
-    if (pos + toReserve > size - 1)
-        throw std::runtime_error("Failed to reserve enough memory.");
-
-    char* ptr = dataChar + pos;
-    pos += toReserve;
-    return ptr;
-}
-
-//returns the amount of bytes written
-unsigned int Turtle::WriteByte(unsigned char data, unsigned int repeats)
+void Turtle::WriteByte(unsigned char byte, unsigned int repeats)
 {
     if (!WriteInstructions)
-        return 0;
+        return;
 
-    for (unsigned int i = 0; i < repeats; i++)
+    for (int i = 0; i < repeats; i++)
     {
-        *Reserve(Instructions, InstructionPos, InstructionSize, 1) = data;
+        Instructions.push_back(byte);
     }
-
-    return repeats;
 }
 
-void Turtle::MoveByRelative(Vec3i move, bool zfirst, bool yfirst)
+void Turtle::MoveByRelative(Vec3i move, bool zfirst)
 {
     Vec3i globalMove = RelativeToGlobal(Rotation, move);
     Pos += globalMove;
     MaxPos = Vec3i::Max(MaxPos, Pos);
     MinPos = Vec3i::Min(MinPos, Pos);
-    Rotation = move.X == 0 || !yfirst ? Rotation : IncrementRotation(Rotation, move.X < 0);
+    Rotation = move.X == 0 ? Rotation : IncrementRotation(Rotation, move.X < 0);
 
     TurtleAction xact = move.X > 0 ? TurtleAction::TurnRight : TurtleAction::TurnLeft;
     TurtleAction yact = move.Y > 0 ? TurtleAction::Forward : TurtleAction::Back;
@@ -95,35 +79,28 @@ void Turtle::MoveByRelative(Vec3i move, bool zfirst, bool yfirst)
     if (zfirst)
         WriteByte(zact, absMove.Z);
 
-    if (yfirst)
-    {
+    if (move.Y != 0)
         WriteByte(yact, absMove.Y);
-        if (move.X != 0)
-            WriteByte(xact);
-        WriteByte(TurtleAction::Forward, absMove.X);
-    }
-    else
+
+    if (move.X != 0)
     {
-        if (move.X != 0) 
-            WriteByte(xact);
+        WriteByte(xact);
         WriteByte(TurtleAction::Forward, absMove.X);
-        WriteByte(xact == TurtleAction::TurnLeft ? TurtleAction::TurnRight : TurtleAction::TurnLeft);
-        WriteByte(yact, absMove.Y);
     }
 
     if (!zfirst)
         WriteByte(zact, absMove.Z);
 }
 
-void Turtle::MoveByGlobal(Vec3i move, bool zfirst, bool yfirst)
+void Turtle::MoveByGlobal(Vec3i move, bool zfirst)
 {
     Vec3i relMove = GlobalToRelative(Rotation, move);
-    MoveByRelative(relMove, zfirst, yfirst);
+    MoveByRelative(relMove, zfirst);
 }
 
-void Turtle::MoveToGlobal(Vec3i pos, bool zfirst, bool yfirst)
+void Turtle::MoveToGlobal(Vec3i pos, bool zfirst)
 {
-    MoveByGlobal(pos - Pos, zfirst, yfirst);
+    MoveByGlobal(pos - Pos, zfirst);
 }
 
 void Turtle::SetRotation(TurtleRotation rotation)
@@ -137,13 +114,13 @@ void Turtle::Dig(PlaceDigDirection dir)
 {
     switch (dir)
     {
-    case PlaceDigDirection::Forward:
+    case PlaceDigDirection::Straight:
         WriteByte(TurtleAction::Dig);
         break;
-    case PlaceDigDirection::Up:
+    case PlaceDigDirection::Above:
         WriteByte(TurtleAction::DigUp);
         break;
-    case PlaceDigDirection::Down:
+    case PlaceDigDirection::Below:
         WriteByte(TurtleAction::DigDown);
         break;
     }
@@ -153,13 +130,13 @@ void Turtle::Place(PlaceDigDirection dir)
 {
     switch (dir)
     {
-    case PlaceDigDirection::Forward:
+    case PlaceDigDirection::Straight:
         WriteByte(TurtleAction::Place);
         break;
-    case PlaceDigDirection::Up:
+    case PlaceDigDirection::Above:
         WriteByte(TurtleAction::PlaceUp);
         break;
-    case PlaceDigDirection::Down:
+    case PlaceDigDirection::Below:
         WriteByte(TurtleAction::PlaceDown);
         break;
     }
@@ -168,7 +145,11 @@ void Turtle::Place(PlaceDigDirection dir)
 void Turtle::SelectSlot(unsigned char slot)
 {
     if (slot == 0 || slot > InventorySize)
-        throw std::runtime_error("Invalid slot number (should be between 1 and 16).");
+        throw std::runtime_error(std::format("Invalid slot number (should be between 1 and {}).", InventorySize));
+
+    if (SelectedSlot == slot)
+        return;
+
     WriteByte(TurtleAction::SelectSlot);
     WriteByte(slot);
     SelectedSlot = slot;
@@ -176,6 +157,8 @@ void Turtle::SelectSlot(unsigned char slot)
 
 void Turtle::Request(unsigned char mat, unsigned char amount)
 {
+    if (mat == 0 || mat > MaxMaterials)
+        throw std::runtime_error(std::format("Invalid slot number (should be between 1 and {}).", MaxMaterials));
     WriteByte(TurtleAction::Request);
     WriteByte(mat);
     WriteByte(amount);
@@ -193,7 +176,7 @@ void Turtle::Refuel(unsigned char amount)
     WriteByte(amount);
 }
 
-void Turtle::WriteToFile(std::filesystem::path path, std::vector<std::string> mats)
+void Turtle::WriteToFile(std::filesystem::path path, std::vector<std::string>& mats)
 {
     std::fstream file = std::fstream(path, std::ios::out | std::ios::binary | std::ios::trunc);
     if (!file.is_open())
@@ -203,11 +186,12 @@ void Turtle::WriteToFile(std::filesystem::path path, std::vector<std::string> ma
     for (std::string name : mats)
     {
         file.write(reinterpret_cast<char*>(name.data()), name.size());
+        file.put(0);
     }
     file.put(0); //two zeroes in a row signify the end of material data
 
     //writing instructions
-    file.write(reinterpret_cast<char*>(Instructions), InstructionPos);
+    file.write(reinterpret_cast<char*>(Instructions.data()), Instructions.size());
 
     file.close();
 }

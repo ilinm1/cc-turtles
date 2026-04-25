@@ -6,11 +6,11 @@ const unsigned char RemoveMaterial = 255;
 
 struct VoxelModel
 {
-	unsigned int Width = 0;
-	unsigned int Length = 0;
-	unsigned int Height = 0;
-	unsigned char MaterialCount = 0;
-	unsigned char* Data = 0;
+	unsigned int Width;
+	unsigned int Length;
+	unsigned int Height;
+	unsigned char MaterialCount;
+	unsigned char* Data;
 
 	VoxelModel(unsigned int width, unsigned int length, unsigned int height, unsigned int matCount, unsigned char* data)
 	{
@@ -32,9 +32,9 @@ struct VoxelModel
 		file.read(reinterpret_cast<char*>(&Height), sizeof(unsigned int));
 		file.read(reinterpret_cast<char*>(&MaterialCount), sizeof(unsigned char));
 
-		unsigned int size = Width * Width * Height;
+		unsigned int size = Width * Length * Height;
 		Data = new unsigned char[size];
-		file.read(reinterpret_cast<char*>(&Data), size);
+		file.read(reinterpret_cast<char*>(Data), size);
 
 		file.close();
 	}

@@ -2,25 +2,50 @@
 #include "turtle.hpp"
 #include "voxel.hpp"
 
-
 //to determine the required amount of materials we reserve this block of memory before writing building instructions and incrementing
 //item count for materials, then when inventory gets fully used we go back to this block and fill it with request instructions
 //for now known material amounts
+unsigned int RefillCount;
 unsigned int RefillBlockBeginning;
 unsigned int SlotsUsed;
 unsigned char ItemCount[InventorySize];
 unsigned char Materials[InventorySize]; //material ID by slot
 unsigned char CurrentSlot[MaxMaterials]; //current slot used by the material
 
+void WriteRefillBlock(Turtle& turtle)
+{
+	for (int i = 0; i < InventorySize; i++)
+	{
+		if (!ItemCount[i])
+			continue;
+
+		unsigned int b = i * 5 + RefillBlockBeginning; //2 bytes per select slot instruction and another 3 per request instruction = 5 bytes
+
+		//select slot
+		turtle.Instructions[b] = TurtleAction::SelectSlot;
+		turtle.Instructions[b + 1] = i + 1;
+
+		//request material
+		turtle.Instructions[b + 2] = TurtleAction::Request;
+		turtle.Instructions[b + 3] = Materials[i] + 1;
+		turtle.Instructions[b + 4] = ItemCount[i];
+	}
+}
+
 void RefillTurtle(Turtle& turtle, VoxelModel& model, std::vector<Vec3i> refills)
 {
 	Vec3i oldPos = turtle.Pos;
 
 	Vec3i nearestRefill;
-	unsigned int minDistance = std::numeric_limits<unsigned int>().max();
+	unsigned int minDist = std::numeric_limits<unsigned int>().max();
 	for (Vec3i refill : refills)
 	{
 		unsigned int dist = (refill - turtle.Pos).LengthLinear();
+		if (dist < minDist)
+		{
+			minDist = dist;
+			nearestRefill = refill;
+		}
 	}
 
 	turtle.MoveToGlobal(nearestRefill, false);
@@ -31,7 +56,7 @@ void RefillTurtle(Turtle& turtle, VoxelModel& model, std::vector<Vec3i> refills)
 	turtle.Refuel(StackSize);
 	turtle.Unload(StackSize);
 
-	RefillBlockBeginning = turtle.InstructionPos;
+	RefillBlockBeginning = turtle.Instructions.size();
 	turtle.WriteByte(TurtleAction::None, InventorySize * 5); //2 bytes per select slot instruction and another 3 per request instruction, for each inventory slot
 	turtle.MoveToGlobal(oldPos, true);
 
@@ -47,10 +72,13 @@ void RefillTurtle(Turtle& turtle, VoxelModel& model, std::vector<Vec3i> refills)
 		CurrentSlot[i] = i;
 		SlotsUsed++;
 	}
+
+	RefillCount++;
 }
 
 void UseMaterial(Turtle& turtle, VoxelModel& model, std::vector<Vec3i> refills, unsigned char mat)
 {
+	mat = mat - 1; //material 0 is void so first material will have index 0 thus we need to subtract 1
 	unsigned char slot = CurrentSlot[mat];
 	if (++ItemCount[slot] == StackSize)
 	{
@@ -61,64 +89,65 @@ void UseMaterial(Turtle& turtle, VoxelModel& model, std::vector<Vec3i> refills, 
 
 	if (SlotsUsed == InventorySize) //time to refill
 	{
-		unsigned int ipos = turtle.InstructionPos;
-		turtle.InstructionPos = RefillBlockBeginning;
-		for (int i = 0; i < InventorySize; i++)
-		{
-			turtle.SelectSlot(i);
-			turtle.Request(Materials[i], ItemCount[i]);
-		}
-		turtle.InstructionPos = ipos;
-
+		WriteRefillBlock(turtle);
 		RefillTurtle(turtle, model, refills);
 	};
 }
 
+void AddRangeToIslands(std::vector<std::vector<Vec3i>>& islands, Vec3i range)
+{
+	bool islandFound = false;
+	for (std::vector<Vec3i>& island : islands)
+	{
+		Vec3i islandLast = island.back();
+		if (range.X > islandLast.Z || range.Z < islandLast.X)
+			continue;
+		island.push_back(range);
+		islandFound = true;
+		break;
+	}
+
+	if (!islandFound)
+		islands.push_back(std::vector<Vec3i>{ range });
+}
+
 std::vector<std::vector<Vec3i>> GetIslands(
 	VoxelModel& model,
-	unsigned int z,
-	int offsetX,
-	int offsetY)
+	Vec3i offset,
+	unsigned int z)
 {
 	unsigned char* layer = model.GetLayer(z);
 	bool startingEdge;
 	std::vector<std::vector<Vec3i>> islands;
 	Vec3i range; //range X - start X coordinate, Z - end X coordinate, Y - Y coordinate
-	for (unsigned int y = offsetY; y < model.Height + offsetY; y++)
+	for (int y = 0; y < model.Length; y++)
 	{
 		startingEdge = true;
-		range = Vec3i(0, y, model.Width);
+		int wy = model.Length - y + offset.Y - 1;
+		range = Vec3i(offset.X, wy, offset.X + model.Width - 1);
 
-		for (unsigned int x = offsetX; x < model.Width + offsetX; x++)
+		for (int x = 0; x < model.Width; x++)
 		{
-			unsigned int index = model.Width * y + x;
-			if (startingEdge && layer[index])
+			int wx = x + offset.X;
+			unsigned char mat = layer[model.Width * y + x];
+
+			if (startingEdge && mat)
 			{
-				range.X = x;
+				range.X = wx;
 				startingEdge = false;
 			}
 
-			if (!startingEdge && !layer[index])
+			if (!startingEdge && !mat)
 			{
-				range.Z = x - 1;
-
-				bool islandFound = false;
-				for (std::vector<Vec3i>& island : islands)
-				{
-					Vec3i islandLast = island.back().Z;
-					if (range.X > islandLast.Z || range.Z < islandLast.X)
-						continue;
-					island.push_back(range);
-					islandFound = true;
-					break;
-				}
-
-				if (!islandFound)
-					islands.push_back(std::vector<Vec3i>{ range });
-
-				range = Vec3i(0, y, model.Width);
+				range.Z = wx - 1;
+				AddRangeToIslands(islands, range);
+				range = Vec3i(offset.X, wy, offset.X + model.Width - 1);
+				startingEdge = true;
 			}
 		}
+
+		if (!startingEdge)
+			AddRangeToIslands(islands, range);
 	}
 
 	return islands;
@@ -127,55 +156,60 @@ std::vector<std::vector<Vec3i>> GetIslands(
 void BuildIsland(
 	Turtle& turtle,
 	VoxelModel& model,
-	std::vector<Vec3i> refills,
+	std::vector<Vec3i>& refills,
 	std::vector<Vec3i>& island,
-	unsigned int z,
-	unsigned int offsetX,
-	unsigned int offsetY)
+	Vec3i offset,
+	unsigned int z)
 {
 	unsigned char* layer = model.GetLayer(z);
 	bool left2right = true; //if set turtle will build the range from start to end, vice versa otherwise
 	for (Vec3i range : island)
 	{
 		turtle.MoveToGlobal(Vec3i(left2right ? range.X : range.Z, range.Y, turtle.Pos.Z));
-		for (int i = 0; i < range.Z - range.X; i++)
+
+		for (int i = 0; i < range.Z - range.X + 1; i++)
 		{
-			unsigned char mat = layer[(turtle.Pos.Y - offsetY) * model.Width + turtle.Pos.X - offsetX];
-			turtle.MoveByGlobal(Vec3i(left2right ? 1 : -1, 0, 0));
-			turtle.SelectSlot(CurrentSlot[mat]);
-			turtle.Place(PlaceDigDirection::Down);
+			int y = model.Length - turtle.Pos.Y + offset.Y - 1;
+			unsigned char mat = layer[y * model.Width + turtle.Pos.X - offset.X];
+			turtle.SelectSlot(CurrentSlot[mat - 1] + 1); //slots range from 1 to 16 (inv size) thus we need to add 1
+			turtle.Place(PlaceDigDirection::Below);
 			UseMaterial(turtle, model, refills, mat);
+
+			if (i != range.Z - range.X)
+				turtle.MoveByGlobal(Vec3i(left2right ? 1 : -1, 0, 0));
 		}
+
 		left2right = !left2right;
 	}
 }
 
 void BuildLayer(
 	Turtle& turtle,
-	VoxelModel model,
-	std::vector<Vec3i> refills,
-	unsigned int z,
-	int offsetX,
-	int offsetY)
+	VoxelModel& model,
+	std::vector<Vec3i>& refills,
+	Vec3i offset,
+	unsigned int z)
 {
-	std::vector<std::vector<Vec3i>> islands = GetIslands(model, z, offsetX, offsetY);
+	std::vector<std::vector<Vec3i>> islands = GetIslands(model, offset, z);
 
 	while (!islands.empty())
 	{
-		std::vector<Vec3i>& nearestIsland = islands.front();
-		unsigned int minDistance = std::numeric_limits<unsigned int>().max();
-		for (std::vector<Vec3i>& island : islands)
+		int nearestIsland;
+		unsigned int minDist = std::numeric_limits<unsigned int>().max();
+		for (int i = 0; i < islands.size(); i++)
 		{
+			std::vector<Vec3i>& island = islands[i];
 			Vec3i islandFirst = island.front();
-			unsigned int distance = abs(turtle.Pos.X - islandFirst.X) + abs(turtle.Pos.Y - islandFirst.Y);
-			if (distance < minDistance)
+			unsigned int dist = abs(turtle.Pos.X - islandFirst.X) + abs(turtle.Pos.Y - islandFirst.Y);
+			if (dist < minDist)
 			{
-				minDistance = distance;
-				nearestIsland = island;
+				minDist = dist;
+				nearestIsland = i;
 			}
 		}
 
-		BuildIsland(turtle, model, refills, nearestIsland, z, offsetX, offsetY);
+		BuildIsland(turtle, model, refills, islands[nearestIsland], offset, z);
+		islands.erase(islands.begin() + nearestIsland);
 	}
 }
 
@@ -185,57 +219,72 @@ void BuildLayer(
 //todo: too lazy to optimize this right now (easiest one would be to build some islands starting from bottom/right when applicable)
 void BuildModel(
 	Turtle& turtle,
-	VoxelModel model,
-	Vec3i start,
-	std::vector<Vec3i> refills)
+	VoxelModel& model,
+	std::vector<Vec3i>& refills,
+	Vec3i offset)
 {
 	RefillTurtle(turtle, model, refills);
 
-	turtle.MoveToGlobal(Vec3i(0, 0, start.Z));
-	for (unsigned int z = 0; z < model.Height; z++)
+	turtle.MoveToGlobal(Vec3i(0, 0, offset.Z));
+	for (int z = 0; z < model.Height; z++)
 	{
 		turtle.MoveByGlobal(Vec3i(0, 0, 1));
-		BuildLayer(turtle, model, refills, z, start.X, start.Y);
+		BuildLayer(turtle, model, refills, offset, z);
 	}
+
+	WriteRefillBlock(turtle); //last refill
+	turtle.MoveToGlobal(Vec3i(0), false);
+	turtle.SetRotation(TurtleRotation::North);
 }
 
 int main()
 {
 	std::cout << "== vox2bin ==\n";
-
-	unsigned int alloc;
-	std::cout << "Instruction buffer size (in bytes): ";
-	std::cin >> alloc;
-	Turtle turtle = Turtle(alloc);
+	Turtle turtle = Turtle();
 
 	std::string str;
-	std::cout << "Path to model (empty string to stop inputting models): ";
+	std::cout << "Path to model: ";
 	std::cin >> str;
 	VoxelModel model = VoxelModel(str);
+	std::cout << "Model dimensions (X Y Z): " << model.Width << " x " << model.Length << " x " << model.Height << ", material count: " << static_cast<int>(model.MaterialCount) << "\n";
 
 	std::cout << "Model's position (X Y Z): ";
-	std::cin >> str;
+	std::cin.ignore();
+	std::getline(std::cin, str);
 	Vec3i start = Vec3i::FromString(str);
 
 	std::vector<Vec3i> refills;
 	while (true)
 	{
 		std::cout << "Refill position (X Y Z, empty string to stop inputting refill positions): ";
-		std::cin >> str;
+		std::getline(std::cin, str);
 		if (str.empty())
 			break;
 		refills.push_back(Vec3i::FromString(str));
 	}
 
+	std::cout << "Building model...\n";
+	BuildModel(turtle, model, refills, start);
+
 	std::vector<std::string> mats;
-	int matId = 0;
-	while(true)
+	std::cout << "Material blocks  (e.g. 'minecraft:dirt'):\n";
+	for (int i = 0; i < model.MaterialCount; i++)
 	{
-		std::cout << "Material " << matId << " block name (i.e. 'minecraft::dirt', empty string to stop inputting material names): ";
-		matId++;
+		std::cout << "Material " << mats.size() + 1 << ": ";
+		std::getline(std::cin, str);
+		if (str.empty())
+			break;
+		mats.push_back(str);
 	}
 
-	BuildModel(turtle, model, start, refills);
+	std::cout << "Fuel type (e.g. 'minecraft:coal'): ";
+	std::cin >> str;
+	mats.push_back(str);
+
 	turtle.WriteToFile("vox2bin-output.bin", mats);
+	std::cout << turtle.Instructions.size() << " bytes, " << RefillCount << " refills.\nOutput written to 'vox2bin-output.bin'. Press enter to exit.";
+	std::cin.ignore();
+	std::cin.get();
+
 	return 0;
 }

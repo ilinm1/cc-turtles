@@ -2,7 +2,7 @@ commandBuffer = ""
 maxX, maxY = 0, 0
 selectedTurtle = 0
 
-function setupWirelessComm()
+function setupWirelessComms()
     for _, side in pairs(rs.getSides()) do
         if peripheral.isPresent(side) and peripheral.getType(side) == "modem" then
             if peripheral.wrap(side).isWireless() then
@@ -48,9 +48,9 @@ function processEvents()
         if arg2["type"] == "msg" then
             writeMessage(string.format("%d | %s", arg1, arg2["data"]))
         elseif arg2["type"] == "status" then
-            writeMessage("== Status for turtle %d ==", arg1)
+            writeMessage(string.format("== Status for turtle %d ==", arg1))
             writeMessage(string.format(
-                "Instruction: %d | X: %d | Y: %d | Z: %d | Rotation: %d | Fuel: %d | Slot: %d | Paused: %d | On refill: %d",
+                "Instruction: %d | X: %d | Y: %d | Z: %d | Rotation: %d | Fuel: %d | Slot: %d | Paused: %s | On refill: %s",
                 arg2["data"]["instr"],
                 arg2["data"]["x"],
                 arg2["data"]["y"],
@@ -58,8 +58,8 @@ function processEvents()
                 arg2["data"]["rot"],
                 arg2["data"]["fuel"],
                 arg2["data"]["slot"],
-                arg2["data"]["paused"],
-                arg2["data"]["onRefill"]
+                tostring(arg2["data"]["paused"]),
+                tostring(arg2["data"]["onRefill"])
             ))
         end
     elseif event == "char" then
@@ -87,7 +87,7 @@ function processEvents()
 end
 
 --entrypoint
-print("== Turtle controller v0.5 ==")
+print("== Turtle controller v1.0 ==")
 if setupWirelessComms() then
     maxX, maxY = term.getSize()
     while true do processEvents() end

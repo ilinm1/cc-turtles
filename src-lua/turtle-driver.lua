@@ -1,4 +1,4 @@
-processEventTimeout = 0.25
+processEventTimeout = 0.2
 
 controllerId = nil
 logHandle = nil
@@ -9,7 +9,7 @@ paused = false
 
 action = 0
 instructionIndex = 0
-materials = nil
+materials = {}
 refillModemConnected = false
 
 --global coordinates
@@ -27,7 +27,7 @@ end
 function findRefillModem()
     for _, side in pairs(rs.getSides()) do
         if peripheral.isPresent(side) and peripheral.getType(side) == "modem" then
-            modem = peripheral.wrap(side)
+            local modem = peripheral.wrap(side)
             if not modem.isWireless() then
                 rednet.open(side)
                 refillModemConnected = true
@@ -45,8 +45,9 @@ function request(id, amount)
     end
 
     paused = true
-    writeLog(string.format("Requesting %d (material %d) units of '%s'.", amount, id, materials[id]))
+    writeLog(string.format("Requesting %d units of '%s' (material %d).", amount, materials[id], id))
     rednet.broadcast({type = "request", item = materials[id], amount = amount, slot = turtle.getSelectedSlot()})
+    return true
 end
 
 function unload(amount)
@@ -54,9 +55,14 @@ function unload(amount)
         return false, "No wired modem found at refill."
     end
 
-    paused = true
-    writeLog(string.format("Unloading %d items."), amount)
-    rednet.broadcast({type = "unload", amount = amount, slot = turtle.getSelectedSlot()})
+    local info = turtle.getItemDetail()
+    if info then
+        paused = true
+        local toUnload = math.min(info["count"], amount)
+        writeLog(string.format("Unloading %d items.", toUnload))
+        rednet.broadcast({type = "unload", item = info["name"], amount = toUnload, slot = turtle.getSelectedSlot()})
+    end
+    return true
 end
 
 function writeLog(msg)
@@ -66,9 +72,9 @@ end
 
 --updates global coordinates using local ones (rotated by turtle's current rotation)
 function modifyPosition(x, y, z)
-    gx = x
-    gy = y
-    gz = z
+    local gx = x
+    local gy = y
+    local gz = z
 
     if currentRotation == 2 then
         gx = y
@@ -90,34 +96,9 @@ function modifyRotation(x)
     currentRotation = math.fmod(currentRotation + x, 4)
 end
 
---using global coordinates
-function moveBy(x, y, z)
-    while currentRotation ~= 1 do
-        turtle.turnRight()
-        modifyRotation(1)
-    end
-
-    for _ = 1, y do
-        turtle.forward()
-    end
-
-    if x > 0 then turtle.turnRight()
-    elseif x < 0 then turtle.turnLeft() end
-
-    for _ = 1, x do
-        turtle.forward()
-    end
-
-    for _ = 1, z do
-        if z > 0 then turtle.up() else turtle.down() end
-    end
-
-    modifyPosition(x, y, z)
-end
-
 function checkAction(result, err)
     if not result then
-        msg = string.format("Action has failed: %s - %s - '%s'.", instructionIndex, action, err)
+        local msg = string.format("Action has failed: %s - %s - '%s'.", instructionIndex, action, err)
         writeLog(msg)
     end
 end
@@ -125,30 +106,33 @@ end
 --setup
 
 function readMaterialData()
-    str = ""
-    strEnd = false
+    local str = ""
+    local strEnd = false
+
     while true do
         ch = readNext()
 
-        if not ch then
+        if ch == 0 then
             if strEnd then --two zeroes in a row -> end of material data
                 break
             end
-            materials[#materials] = str
+
+            table.insert(materials, str)
+            str = ""
             strEnd = true
         else
-            str .. ch
+            str = str .. string.char(ch)
             strEnd = false
         end
     end
 
     writeLog(string.format("Material data read, %d materials registered.", #materials))
-    for id = 0, #materials - 1 do
+    for id = 1, #materials do
         writeLog(string.format("Material %d - '%s'.", id, materials[id]))
     end
 end
 
-function setupWirelessComm()
+function setupWirelessComms()
     for _, side in pairs(rs.getSides()) do
         if peripheral.isPresent(side) and peripheral.getType(side) == "modem" then
             if peripheral.wrap(side).isWireless() then
@@ -164,16 +148,14 @@ end
 --main loop
 
 function nextAction()
-    if waitingForProvider then return false end
-
     action = readNext()
-
-    if action == nil then
-        writeLog("EOF in instruction file.")
-        return false
+    if not action then
+        writeLog("EOF in instruction file. Shutting down.")
+        os.shutdown()
     end
 
-    if          action == 1     then    checkAction(turtle.forward())    modifyPosition(0, 1, 0)
+    if          action == 0     then    --NOP
+    elseif      action == 1     then    checkAction(turtle.forward())    modifyPosition(0, 1, 0)
     elseif      action == 2     then    checkAction(turtle.back())       modifyPosition(0, -1, 0)
     elseif      action == 3     then    checkAction(turtle.up())         modifyPosition(0, 0, 1)
     elseif      action == 4     then    checkAction(turtle.down())       modifyPosition(0, 0, -1)
@@ -189,15 +171,11 @@ function nextAction()
     elseif      action == 14    then    checkAction(request(readNext(), readNext()))
     elseif      action == 15    then    checkAction(unload(readNext()))
     elseif      action == 16    then    checkAction(turtle.refuel(readNext()))
-    else writeLog("Unknown action/NOP")
+    else writeLog("Unknown action")
     end
-
-    return true
 end
 
 function processMessage(id, msg)
-    if id ~= controllerId then return end
-
     if msg["type"] == "status" then
         writeLog("Sending status.")
         rednet.send(id,
@@ -218,40 +196,34 @@ function processMessage(id, msg)
             })
     elseif msg["type"] == "pause" then
         writeLog("Pause toggled.")
-        return true, true
+        paused = not paused
     elseif msg["type"] == "stop" then
-        writeLog("Stop request received.")
-        return false, false
+        writeLog("Shutdown requested.")
+        os.shutdown()
     elseif msg["type"] == "jump" then
         writeLog(string.format("Jumping to instruction no. %d.", msg["instr"]))
         instructionIndex = msg["instr"]
         instructionHandle.seek("set", instructionIndex)
     elseif msg["type"] == "request_done" then
+        writeLog("Request done, continuing.")
         paused = false
     end
-
-    return true, false
 end
 
 function processEvents()
-    local timerId = nil
-    if not paused then
-        timerId = os.startTimer(processEventTimeout)
-    end
+    local timerId = os.startTimer(processEventTimeout)
 
     while true do
         local event, arg1, arg2 = os.pullEvent()
 
         if event == "rednet_message" then
-            return processMessage(arg1, arg2)
+            processMessage(arg1, arg2)
         end
 
         if event == "timer" and arg1 == timerId then
             break
         end
     end
-
-    return true, false
 end
 
 function nextAction_wrapper()
@@ -259,47 +231,24 @@ function nextAction_wrapper()
         local result, arg1 = pcall(nextAction)
         if not result then
             writeLog("Unexpected error while performing action: "..tostring(arg1).."; Continuing.")
-        else
-            if not arg1 then
-                writeLog("nextAction() has returned false, exiting loop.")
-                running = false
-            end
         end
     end
 end
 
 function processEvents_wrapper()
-    local result, arg1, arg2 = pcall(processEvents)
+    local result = pcall(processEvents)
     if not result then
         writeLog("Unexpected error while processing events: "..tostring(running).."; Continuing.")
-    else
-        if not arg1 then
-            writeLog("processEvents() has returned false, exiting loop.")
-            running = false
-        end
-
-        if arg2 then paused = not paused end
     end
 end
 
 --entrypoint
 
-print("== Turtle driver v0.5 ==")
+print("== Turtle driver v1.0 ==")
 logHandle = fs.open("turtle-log.txt", fs.exists("turtle-log.txt") and "a" or "w")
 
 print("Instruction file path: ")
 instructionHandle = fs.open(read(), "rb")
-
-print("Offset X Y Z: ")
-offsetStr = read()
-if offsetStr ~= "" then
-    offsetToks = {}
-    for t in string.gmatch(offsetStr, "[^%s]+") do offsetToks[#offsetToks+1] = t end
-
-    offsetX = tonumber(offsetToks[1])
-    offsetY = tonumber(offsetToks[2])
-    offsetZ = tonumber(offsetToks[3])
-end
 
 print("Instruction offset: ")
 instrOffsetStr = read()
@@ -313,15 +262,8 @@ if controllerIdStr ~= "" then
     controllerId = tonumber(controllerIdStr)
 end
 
-if controllerId == nil or setupWirelessComm() then
+if controllerId == nil or setupWirelessComms() then
     print("Started. Use turtle controller to send commands and see errors.")
-
-    moveBy(offsetX, offsetY, offsetZ)
     readMaterialData()
-
     while running do parallel.waitForAll(processEvents_wrapper, nextAction_wrapper) end
-
-    writeLog("Finishing.")
-    logHandle.close()
-    instructionHandle.close()
 else print("Failed to setup rednet, make sure that you're using turtle with a modem (or if you don't need remote control leave controller ID empty).") end

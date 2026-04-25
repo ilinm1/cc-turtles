@@ -1,7 +1,7 @@
 stackSize = 64
 logHandle = nil
-items = nil --item name (or zero for free slots) -> { chest name, slot, amount }
-itemCount = nil
+items = {} --item name (or zero for free slots) -> { chest name, slot, amount }
+itemCount = { 0 }
 
 function writeLog(msg)
     logHandle.writeLine(msg)
@@ -22,9 +22,9 @@ function setupComms()
 end
 
 function findTurtle(id)
-    for _, wt in pairs(peripheral.find("turtle")) do
-        if wt.getId() == id then
-            return wt
+    for _, wt in pairs({ peripheral.find("turtle") }) do
+        if wt.getID() == id then
+            return peripheral.getName(wt)
         end
     end
 
@@ -32,31 +32,42 @@ function findTurtle(id)
 end
 
 function refreshInventory()
-    items = nil
-    itemCount = nil
-    freeSlots = 0
+    items = {}
+    itemCount = { 0 }
 
-    local chests = peripheral.find("minecraft:chest")
+    local chests = { peripheral.find("minecraft:chest") }
     for _, inv in pairs(chests) do
         local name = peripheral.getName(inv)
-        for slot, info in pairs(inv.list()) do
-            if info then
-                local itemName = info["name"]
-                items[itemName][#items[itemName]] = { inv = name, slot = slot, count = info["count"] }
-                itemCount[itemName] = itemCount[itemName] + info["count"]
-            else
-                items[0] = { inv = name, slot = slot }
-                itemCount[0] = itemCount[0] + stackSize
+        local invList = inv.list()
+        for slot, info in pairs(invList) do
+            local itemName = info["name"]
+            if not items[itemName] then items[itemName] = {} end
+            table.insert(items[itemName], { inv = name, slot = slot, count = info["count"] })
+            if not itemCount[itemName] then itemCount[itemName] = 0 end
+            itemCount[itemName] = itemCount[itemName] + info["count"]
+        end
+
+        for slot = 1, inv.size() do
+            if not invList[slot] then
+                items[1] = { inv = name, slot = slot }
+                itemCount[1] = itemCount[1] + stackSize
             end
         end
     end
-    writeLog(string.format("Inventory refreshed, obtained info for %d item types from %d chests.", #items, #chests))
+
+    writeLog(string.format("Inventory refreshed, found %d chests.", #chests))
+    for name, count in pairs(itemCount) do
+        writeLog(string.format("'%s' - %d", name, count))
+    end
 end
 
-function processRequest(wrappedTurtle, request)
+function processRequest(tname, request)
     local itemName = request["item"]
     local amount = request["amount"]
+    if not itemCount[itemName] then itemCount[itemName] = 0 end
     local available = itemCount[itemName]
+
+    if not available then itemCount[itemName] = 0 end
 
     if available < amount then
         if not request["stale"] then writeLog(string.format("Insufficient amount of '%s', %d available but %d was requested.", name, available, amount)) end
@@ -67,12 +78,13 @@ function processRequest(wrappedTurtle, request)
     itemSlots = items[itemName]
     local required = amount
     for i, info in pairs(itemSlots) do
-        local pulled = wrappedTurtle.pullItems(info["inv"], info["slot"], required, request["slot"])
+        local inv = peripheral.wrap(info["inv"])
+        local pulled = inv.pushItems(tname, info["slot"], required, request["slot"])
         required = required - pulled
         info["count"] = info["count"] - pulled
         if not info["count"] then
-            items[0][#items[0]] = { inv = info["inv"], slot = info["slot"] }
-            itemSlots.remove(i)
+            table.insert(items[1], { inv = info["inv"], slot = info["slot"] })
+            table.remove(itemSlots, i)
             i = i - 1
         end
     end
@@ -80,32 +92,34 @@ function processRequest(wrappedTurtle, request)
     return true
 end
 
-function processUnload(wrappedTurtle, request)
-    local selectedInfo = wrappedTurtle.getItemDetail()
-    local itemName = selectedInfo["name"]
-    local amount = math.min(request["amount"], selectedInfo["count"])
+function processUnload(tname, request)
+    local itemName = request["item"]
+    local amount = request["amount"]
+    local slot = request["slot"]
     local freeInSlots = stackSize - math.fmod(itemCount[itemName], stackSize)
-    local available = itemCount[0] + freeInSlots --assuming perfectly efficient storage
+    local available = itemCount[1] + freeInSlots --assuming perfectly efficient storage
 
     if available < amount then
         if not request["stale"] then writeLog(string.format("Not enough space for '%s', %d available but %d was requested.", name, available, amount)) end
         return false
     end
 
-    itemCount[0] = available - (request["amount"] - freeInSlots > 0) ? stackSize : 0 
+    if amount - freeInSlots > 0 then itemCount[1] = available - stackSize end
     itemSlots = items[itemName]
     local required = amount
     for _, info in pairs(itemSlots) do
-        local pushed = wrappedTurtle.pushItems(info["inv"], request["slot"], required, info["slot"])
-        required = required - pushed
-        info["count"] = info["count"] + pushed
+        local inv = peripheral.wrap(info["inv"])
+        local pulled = inv.pullItems(tname, slot, required, info["slot"])
+        required = required - pulled
+        info["count"] = info["count"] + pulled
         if required <= 0 then return true end
     end
 
-    local freeSlot = items[0][0]
-    local pushed = wrappedTurtle.pushItems(freeSlot["inv"], request["slot"], required, freeSlot["slot"])
-    items[0].remove(0)
-    items[itemName][#items[itemName]] = { inv = freeSlot["inv"], slot = freeSlot["slot"], count = pushed }
+    local freeSlot = items[1][1]
+    local inv = wrap(freeSlot["inv"])
+    local pushed = inv.pullItems(tname, slot, required, freeSlot["slot"])
+    table.remove(items[1], 0)
+    table.insert(items[itemName], { inv = freeSlot["inv"], slot = freeSlot["slot"], count = pushed })
     return true
 end
 
@@ -119,31 +133,37 @@ function processEvents()
         end
 
         if arg2["type"] == "request" then
-            if not processRequest(wrappedTurtle, request) then
+            if not processRequest(wrappedTurtle, arg2) then
                 if not arg2["stale"] then
                     args["stale"] = true
                     writeLog("Cannot process request, marking as stale.")
                 end
                 os.queueEvent("rednet_message", arg1, arg2)
+            else
+                rednet.send(arg1, { type = "request_done" })
             end
         elseif arg2["type"] == "unload" then
-            if not processUnload(wrappedTurtle, request) then
+            if not processUnload(wrappedTurtle, arg2) then
                 if not arg2["stale"] then
                     args["stale"] = true
                     writeLog("Cannot process unload request, marking as stale.")
                 end
                 os.queueEvent("rednet_message", arg1, arg2)
+            else
+                rednet.send(arg1, { type = "request_done" })
             end
         elseif arg2["type"] == "refresh_inventory" then
             writeLog("Refreshing inventory...")
             refreshInventory()
         end
+    elseif event == "key" then
+        if arg1 == keys.enter then refreshInventory() end
     end
 
     return true
 end
 
-print("== Turtle provider v0.1 ==")
+print("== Turtle provider v0.5 ==")
 logHandle = fs.open("provider-log.txt", fs.exists("turtle-log.txt") and "a" or "w")
 if setupComms() then
     refreshInventory()

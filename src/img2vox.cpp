@@ -29,14 +29,14 @@ void AddColor(unsigned char* data, unsigned int size, unsigned int index, unsign
 https://en.wikipedia.org/wiki/Floyd%E2%80%93Steinberg_dithering
 converts a r8g8b8a8 image (from 'data') to a grayscale image with the 'colors' colors using dithering (written back to 'data')
 if 'alphaToBlack' is set all of the transparent pixels will become black
-'errorMultiplier' is multiplied by quantization error (may be useful if algorithm is overcompensating)
-returns an array of bytes, each equal to pixel's color index (0 for transparent, 1 for black, and so on)
+returns an array of bytes, each equal to pixel's color index, 0 for transparent pixels and higher values for lighter tones (e.g. with two colors white will be 1 and black will be 0)
 */
 unsigned char* FloydSteinberg(
     unsigned char* data,
     unsigned int width,
     unsigned int height,
     unsigned int colors,
+    float luminanceMultiplier,
     float errorMultiplier,
     bool alphaToBlack)
 {
@@ -73,8 +73,8 @@ unsigned char* FloydSteinberg(
             (static_cast<float>(r) / 255.0f) * 0.2126f +
             (static_cast<float>(g) / 255.0f) * 0.7152f +
             (static_cast<float>(b) / 255.0f) * 0.0722f;
-        unsigned char colorLevel = luminance * colors;
-        unsigned char color = colorLevel * colorStep;
+        float colorLevel = luminance * luminanceMultiplier * colors;
+        unsigned char color = std::floor(colorLevel) * colorStep;
 
         //passing quantization error
         unsigned char quantizationError = (r + g + b - 3 * color) * errorMultiplier;
@@ -96,7 +96,8 @@ unsigned char* FloydSteinberg(
             AddColor(data, size, index, quantizationError / 16);
 
         r = g = b = color;
-        convertedData[i] = colorLevel + 1;
+        a = 0xFF;
+        convertedData[i] = std::max(std::ceil(colorLevel), 1.0f);
     }
 
     return convertedData;
@@ -120,8 +121,12 @@ int main()
     std::cout << "Color count: ";
     std::cin >> colors;
 
+    float luminanceMultiplier;
+    std::cout << "Luminance multiplier (if the image is too bright/dark): ";
+    std::cin >> luminanceMultiplier;
+
     float errorMultiplier;
-    std::cout << "Error multiplier (typically somewhere in 0.001-0.005 range): ";
+    std::cout << "Error multiplier (if the image is weird, typically in 0.001 - 0.005 range for small images): ";
     std::cin >> errorMultiplier;
 
     char alphaToBlack;
@@ -136,11 +141,12 @@ int main()
 
     int width, height, channels;
     unsigned char* data = stbi_load(static_cast<const char*>(path.string().c_str()), &width, &height, &channels, 4);
-    unsigned char* convertedData = FloydSteinberg(data, width, height, colors, errorMultiplier, alphaToBlack);
-    stbi_write_png("img-output.png", width, height, 4, data, width * 4);
+    unsigned char* convertedData = FloydSteinberg(data, width, height, colors, luminanceMultiplier, errorMultiplier, alphaToBlack);
+    stbi_write_png("img2vox-output.png", width, height, 4, data, width * 4);
     VoxelModel model = VoxelModel(width, vertical ? 1 : height, vertical ? height : 1, colors, convertedData);
-    model.WriteToFile("img-output.bin");
+    model.WriteToFile("img2vox-output.vox");
 
     delete[] data;
+
     return 0;
 }
