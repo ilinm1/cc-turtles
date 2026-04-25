@@ -7,7 +7,6 @@
 #include "stb_image_write.h"
 #include "voxel.hpp"
 
-
 std::tuple<unsigned char&, unsigned char&, unsigned char&, unsigned char&> GetColor(unsigned char* data, unsigned int size, unsigned int index)
 {
     if (index > size - 1)
@@ -140,13 +139,13 @@ int main()
     vertical = vertical == 'y' || vertical == 'Y';
 
     int width, height, channels;
-    unsigned char* data = stbi_load(static_cast<const char*>(path.string().c_str()), &width, &height, &channels, 4);
+    stbi_set_flip_vertically_on_load(vertical);
+    unsigned char* data = stbi_load(path.string().c_str(), &width, &height, &channels, 4);
     unsigned char* convertedData = FloydSteinberg(data, width, height, colors, luminanceMultiplier, errorMultiplier, alphaToBlack);
     stbi_write_png("img2vox-output.png", width, height, 4, data, width * 4);
     VoxelModel model = VoxelModel(width, vertical ? 1 : height, vertical ? height : 1, colors, convertedData);
     model.WriteToFile("img2vox-output.vox");
 
     delete[] data;
-
     return 0;
 }

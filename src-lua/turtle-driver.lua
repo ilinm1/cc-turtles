@@ -11,6 +11,7 @@ action = 0
 instructionIndex = 0
 materials = {}
 refillModemConnected = false
+currentRequest = nil
 
 --global coordinates
 currentRotation = 1 --1 north, 2 east, 3 south, 4 west
@@ -45,8 +46,9 @@ function request(id, amount)
     end
 
     paused = true
+    currentRequest = {type = "request", item = materials[id], amount = amount, slot = turtle.getSelectedSlot()}
+    rednet.broadcast(currentRequest)
     writeLog(string.format("Requesting %d units of '%s' (material %d).", amount, materials[id], id))
-    rednet.broadcast({type = "request", item = materials[id], amount = amount, slot = turtle.getSelectedSlot()})
     return true
 end
 
@@ -59,8 +61,9 @@ function unload(amount)
     if info then
         paused = true
         local toUnload = math.min(info["count"], amount)
+        currentRequest = {type = "unload", item = info["name"], amount = toUnload, slot = turtle.getSelectedSlot()}
+        rednet.broadcast(currentRequest)
         writeLog(string.format("Unloading %d items.", toUnload))
-        rednet.broadcast({type = "unload", item = info["name"], amount = toUnload, slot = turtle.getSelectedSlot()})
     end
     return true
 end
@@ -207,6 +210,10 @@ function processMessage(id, msg)
     elseif msg["type"] == "request_done" then
         writeLog("Request done, continuing.")
         paused = false
+        currentRequest = nil
+    elseif msg["type"] == "provider_online" and currentRequest then
+        writeLog("Repeating current request.")
+        rednet.broadcast(currentRequest)
     end
 end
 
@@ -253,6 +260,7 @@ instructionHandle = fs.open(read(), "rb")
 print("Instruction offset: ")
 instrOffsetStr = read()
 if instrOffsetStr ~= "" then
+    instructionIndex = tonumber(instrOffsetStr)
     instructionHandle.seek("set", tonumber(instrOffsetStr))
 end
 
@@ -263,7 +271,7 @@ if controllerIdStr ~= "" then
 end
 
 if controllerId == nil or setupWirelessComms() then
-    print("Started. Use turtle controller to send commands and see errors.")
+    writeLog("Started.")
     readMaterialData()
     while running do parallel.waitForAll(processEvents_wrapper, nextAction_wrapper) end
 else print("Failed to setup rednet, make sure that you're using turtle with a modem (or if you don't need remote control leave controller ID empty).") end

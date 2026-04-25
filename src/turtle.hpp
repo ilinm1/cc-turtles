@@ -51,7 +51,7 @@ struct Turtle
     Vec3i MaxPos = Vec3i(0);
     Vec3i MinPos = Vec3i(0);
     TurtleRotation Rotation = TurtleRotation::North;
-    unsigned char SelectedSlot = 0;
+    unsigned char SelectedSlot = 0; //zero means that slot is in uncertain state
 
     bool WriteInstructions = true; //if not set then position, rotation and other parameters will be updated but no instruction will be written
     std::vector<unsigned char> Instructions;

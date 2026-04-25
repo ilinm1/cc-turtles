@@ -135,7 +135,7 @@ function processEvents()
         if arg2["type"] == "request" then
             if not processRequest(wrappedTurtle, arg2) then
                 if not arg2["stale"] then
-                    args["stale"] = true
+                    arg2["stale"] = true
                     writeLog("Cannot process request, marking as stale.")
                 end
                 os.queueEvent("rednet_message", arg1, arg2)
@@ -145,7 +145,7 @@ function processEvents()
         elseif arg2["type"] == "unload" then
             if not processUnload(wrappedTurtle, arg2) then
                 if not arg2["stale"] then
-                    args["stale"] = true
+                    arg2["stale"] = true
                     writeLog("Cannot process unload request, marking as stale.")
                 end
                 os.queueEvent("rednet_message", arg1, arg2)
@@ -167,5 +167,6 @@ print("== Turtle provider v0.5 ==")
 logHandle = fs.open("provider-log.txt", fs.exists("turtle-log.txt") and "a" or "w")
 if setupComms() then
     refreshInventory()
+    rednet.broadcast({ type = "provider_online" })
     while true do processEvents() end
 else print("Failed to setup rednet, check that modem is installed on this computer.") end

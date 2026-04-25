@@ -76,7 +76,7 @@ function processEvents()
                 writeMessage("Turtle selected.")
             elseif string.sub(commandBuffer, 1, 6) == "status" then rednet.send(selectedTurtle, {type = "status"})
             elseif string.sub(commandBuffer, 1, 5) == "pause" then rednet.send(selectedTurtle, {type = "pause"})
-            elseif string.sub(commandBuffer, 1, 8) == "stop" then rednet.send(selectedTurtle, {type = "stop"})
+            elseif string.sub(commandBuffer, 1, 4) == "stop" then rednet.send(selectedTurtle, {type = "stop"})
             elseif string.sub(commandBuffer, 1, 5) == "jump " then rednet.send(selectedTurtle, {type = "jump", instr = tonumber(commandToks[2])})
             else writeMessage("Unknown command.")
             end

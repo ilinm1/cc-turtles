@@ -59,6 +59,7 @@ void RefillTurtle(Turtle& turtle, VoxelModel& model, std::vector<Vec3i> refills)
 	RefillBlockBeginning = turtle.Instructions.size();
 	turtle.WriteByte(TurtleAction::None, InventorySize * 5); //2 bytes per select slot instruction and another 3 per request instruction, for each inventory slot
 	turtle.MoveToGlobal(oldPos, true);
+	turtle.SelectedSlot = 0;
 
 	SlotsUsed = 0;
 	memset(ItemCount, 0, sizeof(ItemCount));
@@ -87,7 +88,7 @@ void UseMaterial(Turtle& turtle, VoxelModel& model, std::vector<Vec3i> refills, 
 		SlotsUsed++;
 	}
 
-	if (SlotsUsed == InventorySize) //time to refill
+	if (SlotsUsed == InventorySize + 1) //since "SlotsUsed" counts how many slots are used and not if they're fully filled we need to add one
 	{
 		WriteRefillBlock(turtle);
 		RefillTurtle(turtle, model, refills);
