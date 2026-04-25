@@ -32,6 +32,4 @@ Free mesh voxelizer, export as image series and use series2vox to convert it to 
 
 ### Screenshots:
 <img width="1680" height="1050" alt="image" src="https://github.com/user-attachments/assets/e7fe61b5-5477-4826-a26f-2f6c715d3bc5" />
-<img width="1680" height="1050" alt="image" src="https://github.com/user-attachments/assets/aa22550f-e534-48aa-895b-e570d311833f" />
-
-
+<img width="1680" height="1050" alt="image" src="https://github.com/user-attachments/assets/8f70ed01-6bd9-4777-b195-9f854564f0e5" />
