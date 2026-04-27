@@ -1,6 +1,6 @@
 stackSize = 64
 logHandle = nil
-items = {} --item name (or zero for free slots) -> { chest name, slot, amount }
+items = { {} } --item name (or one for free slots) -> { chest name, slot, amount }
 itemCount = { 0 }
 
 function writeLog(msg)
@@ -32,7 +32,7 @@ function findTurtle(id)
 end
 
 function refreshInventory()
-    items = {}
+    items = { {} }
     itemCount = { 0 }
 
     local chests = { peripheral.find("minecraft:chest") }
@@ -49,7 +49,7 @@ function refreshInventory()
 
         for slot = 1, inv.size() do
             if not invList[slot] then
-                items[1] = { inv = name, slot = slot }
+                table.insert(items[1], { inv = name, slot = slot })
                 itemCount[1] = itemCount[1] + stackSize
             end
         end
@@ -96,7 +96,13 @@ function processUnload(tname, request)
     local itemName = request["item"]
     local amount = request["amount"]
     local slot = request["slot"]
-    local freeInSlots = stackSize - math.fmod(itemCount[itemName], stackSize)
+
+    if not itemCount[itemName] then itemCount[itemName] = 0 end
+    if not items[itemName] then items[itemName] = {} end
+    local rem = math.fmod(itemCount[itemName], stackSize)
+    local freeInSlots = 0
+    if rem > 0 then freeInSlots = stackSize - rem end
+
     local available = itemCount[1] + freeInSlots --assuming perfectly efficient storage
 
     if available < amount then
@@ -104,21 +110,22 @@ function processUnload(tname, request)
         return false
     end
 
-    if amount - freeInSlots > 0 then itemCount[1] = available - stackSize end
-    itemSlots = items[itemName]
-    local required = amount
-    for _, info in pairs(itemSlots) do
-        local inv = peripheral.wrap(info["inv"])
-        local pulled = inv.pullItems(tname, slot, required, info["slot"])
-        required = required - pulled
-        info["count"] = info["count"] + pulled
-        if required <= 0 then return true end
+    if freeInSlots > 0 then
+        itemSlots = items[itemName]
+        for _, info in pairs(itemSlots) do
+            local inv = peripheral.wrap(info["inv"])
+            local pulled = inv.pullItems(tname, slot, amount, info["slot"])
+            amount = amount - pulled
+            info["count"] = info["count"] + pulled
+            if amount <= 0 then return true end
+        end
     end
 
+    itemCount[1] = itemCount[1] - stackSize
     local freeSlot = items[1][1]
-    local inv = wrap(freeSlot["inv"])
-    local pushed = inv.pullItems(tname, slot, required, freeSlot["slot"])
-    table.remove(items[1], 0)
+    local inv = peripheral.wrap(freeSlot["inv"])
+    local pushed = inv.pullItems(tname, slot, amount, freeSlot["slot"])
+    table.remove(items[1], 1)
     table.insert(items[itemName], { inv = freeSlot["inv"], slot = freeSlot["slot"], count = pushed })
     return true
 end
