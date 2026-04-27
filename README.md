@@ -3,6 +3,7 @@ Set of tools for building 3D models and images with computercraft turtles.<br />
 ### Tools:
 img2vox - converts image to a vox file (using dithering to limit the amount of colors).<br />
 series2vox - converts series of images to a vox file.<br />
+quarry - creates a program for digging out a parallelepiped area.<br />
 vox2bin - converts vox file to a binary file with turtle instructions.<br />
 
 ### .vox format:
