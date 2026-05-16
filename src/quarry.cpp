@@ -74,6 +74,7 @@ unsigned int DigQuarry(Turtle& turtle, std::vector<Vec3i>& refills, Vec3i dims, 
 	}
 
 	turtle.MoveToGlobal(Vec3i(0), true);
+	turtle.SetRotation(TurtleRotation::North);
 	return refillCount;
 }
 

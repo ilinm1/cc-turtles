@@ -243,9 +243,9 @@ function nextAction_wrapper()
 end
 
 function processEvents_wrapper()
-    local result = pcall(processEvents)
+    local result, arg1 = pcall(processEvents)
     if not result then
-        writeLog("Unexpected error while processing events: "..tostring(running).."; Continuing.")
+        writeLog("Unexpected error while processing events: "..tostring(arg1).."; Continuing.")
     end
 end
 
