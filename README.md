@@ -22,7 +22,7 @@ Layers are written starting from the bottom layer (lowest Z coordinate), while e
 6. Launch all programs, follow driver's instructions. For receiving messages and sending commands from/to the turtle use the turtle controller ("select TURTLE NUMBER", "status"/"pause"/"stop"/"jump INSTRUCTION").
 
 ### Troubleshooting:
-Check that you've specified the right materials and fuel type when running the vox2bin program. If some materials are unavailable turtle will wait until it's request is fullfilled indefinitely (unless unpaused with the controller).<br />
+Check that you've specified the right materials and fuel type when running the vox2bin program. If some materials are unavailable turtle will wait indefinitely until it's request is fullfilled (unless unpaused with the controller).<br />
 Check that all your storage chests are connected to the wired network and that their modems are activated (right click on them).<br />
 If a wired modem at the restock point is deactivating once the turtle is moving place some other peripheral adjacent to it and activate it again.<br />
 Read messages received by the controller (if you've set it up).<br />
